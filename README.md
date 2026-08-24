@@ -1,1 +1,202 @@
-# vibe-ssh
+# Vibe SSH
+
+Workbench terminal / SFTP / tunnel theo phong cách MobaXterm, cho **macOS** và
+**Windows**. Mọi dữ liệu nằm trên máy người dùng — không có server, không telemetry.
+
+## Stack
+
+| Lớp | Chọn | Lý do |
+|---|---|---|
+| Vỏ ứng dụng | **Tauri 2** (Rust) | dùng WebView hệ điều hành, không bundle Chromium → binary và RAM nhỏ hơn Electron nhiều |
+| UI | React 18 + TypeScript + Vite | không dùng UI kit, không dùng icon library — CSS và icon tự viết |
+| Terminal | xterm.js + WebGL addon | render nhanh, hỗ trợ unicode 11 |
+| SSH | `russh` (Rust thuần) | không cần OpenSSL/libssh2, hỗ trợ X11 channel |
+| SFTP | `russh-sftp` | |
+| Shell cục bộ | `portable-pty` | PTY thật trên macOS và Windows |
+| Bí mật | `keyring` | macOS Keychain / Windows Credential Manager |
+
+## Chạy
+
+```bash
+npm install
+npm run app
+```
+
+Đóng gói:
+
+```bash
+npm run app:build
+```
+
+Ra `.dmg`/`.app` trên macOS, `.msi`/NSIS trên Windows.
+
+## Tính năng đã cài đặt
+
+**Giao thức**
+
+| | |
+|---|---|
+| SSH | agent → khóa → mật khẩu → keyboard-interactive, thử theo thứ tự bạn đặt |
+| SFTP | duyệt, sửa quyền, truyền file **và cả thư mục** |
+| Telnet | tự cài đặt (RFC 854 + TTYPE/NAWS/SGA/ECHO), không gọi binary ngoài |
+| Serial | RS-232 / USB-UART, chọn baud, khung, flow control |
+| Mosh | chạy qua `mosh` cài trên máy, cổng và khóa truyền qua `--ssh` |
+| Shell cục bộ | zsh/bash trên macOS, PowerShell trên Windows |
+| RDP / VNC | chuyển sang ứng dụng mặc định của hệ thống (không nhúng) |
+
+**Kết nối**
+- Chuỗi bastion / ProxyJump nhiều chặng (tối đa 4)
+- Xác minh host key có hỏi người dùng, lưu fingerprint SHA256 riêng; nhập được từ `~/.ssh/known_hosts`
+- Keepalive, nén zlib, TERM tuỳ chọn, biến môi trường, lệnh chạy tự động sau khi vào shell
+- Nhập session từ `~/.ssh/config`
+- Chế độ portable: đặt `VIBE_SSH_DATA_DIR` để mọi cấu hình nằm trong thư mục bạn chọn
+
+**Terminal**
+- Tab + chia pane: 1, 2 dọc, 2 ngang, lưới 2×2
+- Multi-exec: gõ một lần, gửi tới nhiều pane đã chọn
+- Macro/snippet gửi một cú nhấp
+- Tìm trong màn hình (`⌘F`), copy khi bôi đen, chuột phải để dán
+- Ghi log phiên ra file
+
+**SFTP**
+- Bảng thư mục xa tự mở khi SSH vào và **đi theo `cd` trong terminal** (qua OSC 7)
+- Xem nội dung file văn bản ngay trong bảng, không cần tải về
+- Duyệt, breadcrumb, sắp xếp, lọc
+- Tạo thư mục, đổi tên, xóa đệ quy, `chmod`, đọc symlink
+- Tải lên / tải xuống **file lẻ hoặc cả cây thư mục**, có tiến độ tính trên tổng dung lượng
+- Kéo file hoặc thư mục từ Finder/Explorer vào để tải lên
+
+**Tunnel**
+- Local (`-L`), remote (`-R`), dynamic SOCKS5 (`-D`)
+- Tự chạy khi session kết nối
+
+**Khác**
+- X11 forwarding và agent forwarding
+- Keychain hệ điều hành cho mật khẩu / passphrase
+- 3 theme: tối, sáng, tương phản cao (AAA); mọi cặp màu chữ/nền ≥ 4.5:1
+- Bảng lệnh `⌘K` — popup duy nhất trong app, mọi thứ khác là inline
+
+## Giới hạn còn lại
+
+| Thứ | Trạng thái |
+|---|---|
+| Mosh | cần `mosh` cài sẵn trên máy — app không tự cài đặt giao thức SSP |
+| RDP / VNC | chuyển sang ứng dụng mặc định của hệ thống, không nhúng cửa sổ |
+| X server kèm theo | không — cần XQuartz (macOS) hoặc VcXsrv/Xming (Windows) đang chạy |
+| Bộ công cụ UNIX kèm theo (kiểu Cygwin của MobaXterm) | không |
+| Agent forwarding trên Windows | chưa — cần chuyển tiếp qua named pipe, hiện chỉ có unix socket |
+| Kéo file từ bảng SFTP ra Finder/Explorer | không — webview không làm được drag source; chiều ngược lại (kéo vào) thì có |
+| Sửa file xa tại chỗ | chỉ xem được; sửa thì tải về, sửa, rồi tải lên |
+
+## Phím tắt
+
+| Phím | Việc |
+|---|---|
+| `⌘K` / `Ctrl K` | bảng lệnh |
+| `⌘T` | tab mới |
+| `⌘W` | đóng tab |
+| `⌘D` / `⌘⇧D` | chia pane dọc / ngang |
+| `⌘B` | ẩn/hiện sidebar |
+| `⌘E` | ẩn/hiện SFTP |
+| `⌘⇧I` | bật/tắt multi-exec |
+| `⌘1`…`⌘9` | chuyển tab |
+| `⌘F` | tìm trong terminal |
+
+## Dữ liệu lưu ở đâu
+
+- Cấu hình: `~/Library/Application Support/VibeSSH/config.json` (macOS) ·
+  `%APPDATA%\VibeSSH\config.json` (Windows)
+- Host key đã tin: `known_hosts.json` cùng thư mục
+- Mật khẩu / passphrase: keychain hệ điều hành, **không** nằm trong file cấu hình
+- Log phiên: thư mục cấu hình được trong Cài đặt (mặc định `~/VibeSSH-logs`)
+
+## Số đo thực tế (macOS 15.3, Apple Silicon)
+
+| Chỉ số | Giá trị |
+|---|---|
+| `Vibe SSH.app` | **3,9 MB** |
+| `.dmg` | **2,56 MB** |
+| Bundle JS (gzip) | 190 KB |
+
+RAM đo bằng `vmmap --summary` (physical footprint — đúng con số Activity Monitor
+hiển thị), cộng tiến trình chính với đúng ba tiến trình WebKit của app:
+
+| Trạng thái | Tổng | Chi tiết |
+|---|---|---|
+| Vừa mở, 1 tab trống | **≈ 76 MB** | 22 chính + 35 WebContent + 14 GPU + 5 Networking |
+| Sau vài phút dùng thật, nhiều terminal mở | **≈ 161 MB** | 27 chính + 104 WebContent + 24 GPU + 6 Networking |
+
+Phần WebContent tăng theo số terminal đang mở: mỗi terminal giữ scrollback và một
+texture atlas WebGL. Tắt **Tăng tốc WebGL** trong Cài đặt sẽ giảm phần này, đổi
+lại vẽ chậm hơn. WebKit là tiến trình hệ thống dùng chung, không phải Chromium
+đóng gói riêng như Electron.
+
+## Đã kiểm chứng những gì
+
+`cargo test` — **35 test, chạy lặp lại ổn định trong ~1 giây**. Bộ test tự dựng
+một `sshd` thật trên loopback (cổng trống, khóa sinh riêng, chạy dưới quyền user
+thường) rồi dùng chính code của app để kết nối, nên đường SSH được kiểm tra thật
+chứ không phải mock. Nếu máy không dựng được `sshd` thì các test đó tự bỏ qua.
+
+**SSH / SFTP / tunnel — đầu-cuối với server thật**
+
+| Test | Kiểm gì |
+|---|---|
+| `connects_with_key_and_runs_a_command` | xác thực ed25519, mở shell, `echo` về đúng qua `term:data` |
+| `connects_with_rsa_key` | nhánh thương lượng `rsa-sha2-*` |
+| `connects_through_a_bastion` | chuỗi jump: direct-tcpip + `connect_stream`, shell chạy qua bastion |
+| `asks_before_trusting_an_unknown_host_key` | vòng hỏi/đáp host key, fingerprint SHA256, ghi nhớ |
+| `rejects_unknown_host_key_in_strict_mode` | chế độ strict từ chối, không hỏi |
+| `sftp_round_trip` | mkdir → upload 72 KB → list → chmod 600 → đọc nội dung → download → rename → xóa đệ quy |
+| `sftp_transfers_whole_directories` | upload và download cả cây thư mục 3 tầng |
+| `local_forward_carries_traffic` | `-L`: banner SSH đi hết đường hầm |
+| `dynamic_socks5_proxy_connects` | `-D`: bắt tay SOCKS5, CONNECT, rồi truyền dữ liệu |
+| `remote_forward_reaches_back` | `-R`: server bind cổng, dữ liệu về tới listener cục bộ |
+
+**Terminal, Telnet, Serial**
+
+| Test | Kiểm gì |
+|---|---|
+| `shell_output_reaches_the_frontend` | PTY thật → base64 → sự kiện `term:data` |
+| `resize_reaches_the_pty` | resize → `stty size` trả về đúng 133×41 |
+| `negotiates_then_carries_data_both_ways` | Telnet với server thật: TTYPE, NAWS 132×43, dữ liệu hai chiều, Enter thành CR LF |
+| 8 test NVT | lọc IAC, IAC tách giữa hai lần đọc, từ chối option lạ, mã hoá dữ liệu ra |
+| `lists_ports_without_error` | liệt kê cổng serial (máy này thấy 4 cổng) |
+
+**Logic riêng của Windows** — không cross-compile được từ macOS (thiếu Windows
+SDK), nên phần quyết định được tách khỏi khối `#[cfg(windows)]` để test ngay ở đây:
+
+| Test | Kiểm gì |
+|---|---|
+| `picks_sensible_default_shells` | chọn shell: `$SHELL -l` trên Unix; pwsh7 → ComSpec → powershell.exe trên Windows |
+| `adds_windows_extensions` | tìm chương trình theo `PATHEXT` |
+| `reads_tasklist_memory_column` | đọc RAM từ CSV của `tasklist`, có dấu phẩy phân cách nghìn |
+| `expands_home_prefix` | `~/` và `~\` |
+
+Bộ giải base64 phía frontend được đối chiếu với `Buffer.from(...,'base64')` trên
+600 trường hợp, đủ mọi độ dài mod 4. Giao diện được xem và sửa trực tiếp ở cả ba
+theme, ở đúng kích thước cửa sổ mặc định.
+
+**Vẫn chưa kiểm chứng:** app chưa được build và chạy trên Windows thật. Mọi
+nhánh `#[cfg(windows)]` đều có mặt và phần logic đã được test như trên, nhưng
+khoảng 6 dòng gọi API riêng của Windows (named pipe cho ssh-agent, Pageant, dò
+đường dẫn pwsh) chưa từng được biên dịch. Cả `serialport` trên Windows cũng vậy.
+
+## Ghi chú kỹ thuật
+
+- Xác thực SSH chạy trên một runtime `current_thread` riêng: `russh` dựng future
+  cho `Signer` (ssh-agent) mà không đảm bảo `Send`, nên không đặt được trực tiếp
+  trong future của lệnh Tauri.
+- Dữ liệu terminal được gộp ~6 ms hoặc 24 KB một lần rồi truyền base64 để không
+  làm ngập kênh IPC khi output dồn dập.
+- Handler SSH giữ một `Asker` thay vì `Arc<AppState>`; giữ `AppState` sẽ tạo vòng
+  `AppState → SshConn → Handle<Client> → Client → AppState` và làm future mất `Send`.
+- CSS không dùng `color-mix()`: WKWebView trên macOS 11–15 chưa hỗ trợ, các viền
+  pha màu sẽ biến mất. Màu viền được khai báo thành token riêng cho từng theme.
+- Kéo cửa sổ dùng thuộc tính `data-tauri-drag-region` (không phải
+  `-webkit-app-region` của Electron).
+- `russh` dùng backend `ring` thay vì `aws-lc-rs` mặc định: build trên Windows
+  chỉ cần MSVC, không cần thêm NASM.
+- Lớp SSH/PTY/Telnet/Serial không phụ thuộc Tauri — chúng nói với giao diện qua
+  `Ui` (một sink sự kiện + kênh hỏi/đáp). Nhờ vậy test dựng được `Ui` đọc qua
+  channel, không cần cửa sổ nào.

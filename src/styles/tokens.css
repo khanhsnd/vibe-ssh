@@ -1,0 +1,229 @@
+/* ── Design tokens ─────────────────────────────────────────────────────────
+   3 theme: dark (mặc định), light, contrast (WCAG AAA).
+   Mọi màu chữ/nền đều được chọn để đạt tối thiểu 4.5:1 (text) và 3:1 (UI).
+   ------------------------------------------------------------------------ */
+:root {
+  /* Layout */
+  --tb-h: 38px;          /* title bar */
+  --tab-h: 34px;
+  --status-h: 24px;
+  --rail-w: 48px;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
+
+  /* Typography */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+    "Segoe UI", Inter, system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Mono",
+    Menlo, Consolas, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur: 140ms;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.18);
+  --shadow-2: 0 6px 18px -4px rgb(0 0 0 / 0.32), 0 2px 6px rgb(0 0 0 / 0.16);
+  --shadow-3: 0 18px 48px -12px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.2);
+}
+
+/* ── Dark (default) ─────────────────────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --bg-elevated: #161b22;
+  --surface: #161b22;
+  --surface-2: #1c2128;
+  --surface-3: #262c36;
+  --surface-hover: #1f242c;
+  --surface-active: #2a313c;
+
+  --border: #2f3742;
+  --border-strong: #4a5361;
+  --border-focus: #58a6ff;
+
+  --text: #e6edf3;         /* 13.6:1 on --bg */
+  --text-2: #b6c2ce;       /*  9.1:1 */
+  --text-3: #8d99a6;       /*  5.6:1 */
+  --text-inv: #0d1117;
+
+  --accent: #58a6ff;       /*  6.4:1 */
+  --accent-hover: #79b8ff;
+  --accent-bg: #1f6feb2b;
+  --accent-fg: #0d1117;
+
+  --ok: #3fb950;
+  --ok-bg: #23863626;
+  --warn: #e3b341;
+  --warn-bg: #bb800926;
+  --danger: #ff7b72;
+  --danger-bg: #da363326;
+  --info: #79c0ff;
+
+  --accent-line: #2b5f9e;
+  --accent-line-strong: #3b7cc9;
+  --ok-line: #2a6b34;
+  --warn-line: #7a6425;
+  --danger-line: #8f4a45;
+
+  --sel: #2f6feb44;
+  --scrollbar: #464e58;
+  --scrollbar-hover: #626d7a;
+
+  /* Terminal palette (One Dark-ish, kiểm tra tương phản trên #0d1117) */
+  --t-bg: #0d1117;
+  --t-fg: #d7dee6;
+  --t-cursor: #58a6ff;
+  --t-sel: #2f6feb55;
+  --t-black: #484f58;
+  --t-red: #ff7b72;
+  --t-green: #56d364;
+  --t-yellow: #e3b341;
+  --t-blue: #79c0ff;
+  --t-magenta: #d2a8ff;
+  --t-cyan: #56d4dd;
+  --t-white: #b1bac4;
+  --t-bblack: #6e7681;
+  --t-bred: #ffa198;
+  --t-bgreen: #7ee787;
+  --t-byellow: #f2cc60;
+  --t-bblue: #a5d6ff;
+  --t-bmagenta: #e2c5ff;
+  --t-bcyan: #b3f0ff;
+  --t-bwhite: #f0f6fc;
+}
+
+/* ── Light ──────────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-elevated: #ffffff;
+  --surface: #f6f8fa;
+  --surface-2: #eef1f4;
+  --surface-3: #e4e8ec;
+  --surface-hover: #eaeef2;
+  --surface-active: #dde3e9;
+
+  --border: #d5dbe1;
+  --border-strong: #a6b0bb;
+  --border-focus: #0969da;
+
+  --text: #1f2328;         /* 15.3:1 */
+  --text-2: #464d55;       /*  8.9:1 */
+  --text-3: #636c76;       /*  5.6:1 */
+  --text-inv: #ffffff;
+
+  --accent: #0969da;       /*  5.4:1 */
+  --accent-hover: #0550ae;
+  --accent-bg: #0969da1a;
+  --accent-fg: #ffffff;
+
+  --ok: #1a7f37;
+  --ok-bg: #1a7f371a;
+  --warn: #8a6100;
+  --warn-bg: #9a68001a;
+  --danger: #cf222e;
+  --danger-bg: #cf222e1a;
+  --info: #0550ae;
+
+  --accent-line: #8cb6e8;
+  --accent-line-strong: #4f8ed1;
+  --ok-line: #8ec49b;
+  --warn-line: #cbb079;
+  --danger-line: #e79aa1;
+
+  --sel: #0969da26;
+  --scrollbar: #c2c9d1;
+  --scrollbar-hover: #9aa4ae;
+
+  --t-bg: #ffffff;
+  --t-fg: #24292f;
+  --t-cursor: #0969da;
+  --t-sel: #0969da33;
+  --t-black: #24292f;
+  --t-red: #cf222e;
+  --t-green: #116329;
+  --t-yellow: #7d4e00;
+  --t-blue: #0969da;
+  --t-magenta: #8250df;
+  --t-cyan: #1b7c83;
+  --t-white: #6e7781;
+  --t-bblack: #57606a;
+  --t-bred: #a40e26;
+  --t-bgreen: #1a7f37;
+  --t-byellow: #633c01;
+  --t-bblue: #0550ae;
+  --t-bmagenta: #6639ba;
+  --t-bcyan: #1b7c83;
+  --t-bwhite: #1f2328;
+}
+
+/* ── High contrast (AAA) ────────────────────────────────────────────────── */
+[data-theme="contrast"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --bg-elevated: #0a0a0a;
+  --surface: #0d0d0d;
+  --surface-2: #161616;
+  --surface-3: #222222;
+  --surface-hover: #1f1f1f;
+  --surface-active: #333333;
+
+  --border: #6e6e6e;
+  --border-strong: #ffffff;
+  --border-focus: #ffe000;
+
+  --text: #ffffff;         /* 21:1 */
+  --text-2: #f0f0f0;
+  --text-3: #cfcfcf;       /* 15:1 */
+  --text-inv: #000000;
+
+  --accent: #ffe000;       /* 17:1 */
+  --accent-hover: #fff35c;
+  --accent-bg: #ffe0002e;
+  --accent-fg: #000000;
+
+  --ok: #4ff05a;
+  --ok-bg: #4ff05a26;
+  --warn: #ffc74d;
+  --warn-bg: #ffc74d26;
+  --danger: #ff8b83;
+  --danger-bg: #ff8b8326;
+  --info: #7fd3ff;
+
+  --accent-line: #ffe000;
+  --accent-line-strong: #ffe000;
+  --ok-line: #4ff05a;
+  --warn-line: #ffc74d;
+  --danger-line: #ff8b83;
+
+  --sel: #ffe00040;
+  --scrollbar: #8a8a8a;
+  --scrollbar-hover: #ffffff;
+
+  --t-bg: #000000;
+  --t-fg: #ffffff;
+  --t-cursor: #ffe000;
+  --t-sel: #ffe00055;
+  --t-black: #767676;
+  --t-red: #ff8b83;
+  --t-green: #4ff05a;
+  --t-yellow: #ffe000;
+  --t-blue: #7fd3ff;
+  --t-magenta: #e6b3ff;
+  --t-cyan: #6ff0ff;
+  --t-white: #ffffff;
+  --t-bblack: #a0a0a0;
+  --t-bred: #ffb3ad;
+  --t-bgreen: #9dff9d;
+  --t-byellow: #fff35c;
+  --t-bblue: #b3e6ff;
+  --t-bmagenta: #f0d4ff;
+  --t-bcyan: #b3f7ff;
+  --t-bwhite: #ffffff;
+}

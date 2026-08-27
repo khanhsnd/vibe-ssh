@@ -100,22 +100,28 @@ export function SftpPanel({ connId, termId }: { connId: string; termId?: string 
   // Kéo file từ Finder/Explorer vào panel = tải lên thư mục đang mở.
   useEffect(() => {
     let off: (() => void) | undefined;
-    void getCurrentWebview()
-      .onDragDropEvent((e) => {
-        if (e.payload.type === "over") {
-          const el = listRef.current;
-          if (!el) return;
-          const r = el.getBoundingClientRect();
-          const { x, y } = e.payload.position;
-          setDropping(x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
-        } else if (e.payload.type === "drop") {
-          if (droppingRef.current && pathRef.current) void upload(e.payload.paths, pathRef.current);
-          setDropping(false);
-        } else {
-          setDropping(false);
-        }
-      })
-      .then((f) => { off = f; });
+    try {
+      void getCurrentWebview()
+        .onDragDropEvent((e) => {
+          if (e.payload.type === "over") {
+            const el = listRef.current;
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            const { x, y } = e.payload.position;
+            setDropping(x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
+          } else if (e.payload.type === "drop") {
+            if (droppingRef.current && pathRef.current) void upload(e.payload.paths, pathRef.current);
+            setDropping(false);
+          } else {
+            setDropping(false);
+          }
+        })
+        .then((f) => { off = f; })
+        .catch(() => {});
+    } catch {
+      // Không có API webview (ví dụ xem UI ngoài Tauri): mất kéo-thả thôi,
+      // không được để nó làm sập cả cây React.
+    }
     return () => off?.();
   }, [upload]);
 

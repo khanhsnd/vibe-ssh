@@ -31,9 +31,12 @@ export default function App() {
   useShortcuts();
 
   const cur = app.activePane();
-  const sftpConn = cfg.settings.showSftp && cur?.pane.kind === "ssh" && cur.pane.connId && cur.pane.status !== "empty"
-    ? cur.pane.connId
-    : null;
+  // Chỉ mở SFTP cho kết nối đang sống: pane lỗi hoặc đã đóng thì mọi lệnh SFTP
+  // đều thất bại, hiện bảng chỉ để báo lỗi là vô ích.
+  const sftpConn =
+    cfg.settings.showSftp && cur?.pane.kind === "ssh" && cur.pane.status === "ready" && cur.pane.connId
+      ? cur.pane.connId
+      : null;
 
   return (
     <div className="app">

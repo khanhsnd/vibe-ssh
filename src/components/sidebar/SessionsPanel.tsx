@@ -36,6 +36,8 @@ export function SessionsPanel() {
     if (s) return <SessionEditor session={s} isNew={editing === "new"} />;
   }
 
+  /// `pane`: mở, hoặc nhảy tới nếu session đang mở sẵn.
+  /// `tab`: luôn mở thêm một phiên mới ở tab riêng.
   const openIn = (s: Session, mode: "pane" | "tab") => {
     if (mode === "tab") {
       const id = newTab();
@@ -215,8 +217,8 @@ export function SessionsPanel() {
             <Menu
               onClose={pop.close}
               items={[
-                { label: "Mở trong pane", icon: "play", onPick: () => openIn((pop.state!.data as { s: Session }).s, "pane") },
-                { label: "Mở tab mới", icon: "plus", onPick: () => openIn((pop.state!.data as { s: Session }).s, "tab") },
+                { label: "Mở / chuyển tới", icon: "play", onPick: () => openIn((pop.state!.data as { s: Session }).s, "pane") },
+                { label: "Mở thêm phiên (tab mới)", icon: "plus", onPick: () => openIn((pop.state!.data as { s: Session }).s, "tab") },
                 { separator: true, label: "" },
                 { label: "Sửa", icon: "edit", onPick: () => setEditing((pop.state!.data as { s: Session }).s.id) },
                 {

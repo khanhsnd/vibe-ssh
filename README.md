@@ -15,20 +15,95 @@ Workbench terminal / SFTP / tunnel theo phong cách MobaXterm, cho **macOS** và
 | Shell cục bộ | `portable-pty` | PTY thật trên macOS và Windows |
 | Bí mật | `keyring` | macOS Keychain / Windows Credential Manager |
 
-## Chạy
+## Chạy & cài
+
+### Chuẩn bị (chỉ làm một lần)
+
+Cần **Node** và **Rust**. Xcode Command Line Tools là đủ, không cần bản Xcode đầy đủ.
 
 ```bash
-npm install
+xcode-select --install
+```
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+```
+
+Nếu dùng **fish**, thêm cargo vào PATH vĩnh viễn:
+
+```bash
+fish_add_path -U $HOME/.cargo/bin
+```
+
+Với bash/zsh thì rustup đã tự thêm vào `~/.zprofile`; mở terminal mới là có.
+
+Kiểm tra mọi thứ đã sẵn sàng:
+
+```bash
+npm install && npm run tauri -- info
+```
+
+(`Xcode: not installed` trong kết quả là bình thường — Command Line Tools là đủ.)
+
+### Chạy khi đang phát triển
+
+```bash
 npm run app
 ```
 
-Đóng gói:
+Đây là lệnh dùng hằng ngày: mở cửa sổ app thật, sửa file trong `src/` là giao
+diện cập nhật ngay, sửa file trong `src-tauri/src/` thì Rust build lại và app
+tự khởi động lại. Lần đầu mất vài phút vì phải biên dịch toàn bộ crate.
+
+```bash
+npm run dev
+```
+
+Chỉ chạy giao diện trên trình duyệt ở `http://localhost:5273`. Tiện để xem
+nhanh bố cục và màu, nhưng **không có backend**: không SSH, không SFTP, không
+terminal được. Chỉ dùng để soi CSS.
+
+### Test
+
+```bash
+cd src-tauri && cargo test
+```
+
+Bộ test tự dựng một `sshd` thật trên loopback rồi tắt đi khi xong, không để lại
+gì trên máy.
+
+### Đóng gói để cài
 
 ```bash
 npm run app:build
 ```
 
-Ra `.dmg`/`.app` trên macOS, `.msi`/NSIS trên Windows.
+Kết quả:
+
+| Tệp | Đường dẫn |
+|---|---|
+| App | `src-tauri/target/release/bundle/macos/Vibe SSH.app` |
+| Bộ cài | `src-tauri/target/release/bundle/dmg/Vibe SSH_0.1.0_aarch64.dmg` |
+
+Cài: mở `.dmg` rồi kéo **Vibe SSH** vào Applications. Hoặc chép thẳng:
+
+```bash
+cp -R "src-tauri/target/release/bundle/macos/Vibe SSH.app" /Applications/
+```
+
+Trên Windows chạy đúng `npm run app:build`, ra `.msi` và bộ cài NSIS trong
+`src-tauri/target/release/bundle/`.
+
+**Về chữ ký:** app chỉ được ký ad-hoc (`adhoc, linker-signed`), không có
+Developer ID. Trên máy bạn — nơi vừa build ra — mở bình thường. Nhưng nếu gửi
+`.dmg` cho máy khác, macOS sẽ chặn với thông báo "không xác minh được nhà phát
+triển". Người nhận phải chuột phải vào app → **Open**, hoặc gỡ cờ cách ly:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Vibe SSH.app"
+```
+
+Muốn phân phối tử tế thì cần tài khoản Apple Developer để ký và notarize.
 
 ## Tính năng đã cài đặt
 
@@ -47,6 +122,8 @@ Ra `.dmg`/`.app` trên macOS, `.msi`/NSIS trên Windows.
 **Kết nối**
 - Chuỗi bastion / ProxyJump nhiều chặng (tối đa 4)
 - Xác minh host key có hỏi người dùng, lưu fingerprint SHA256 riêng; nhập được từ `~/.ssh/known_hosts`
+- Nhập mật khẩu vào ô là tự lưu vào keychain hệ thống; để trống thì hỏi mỗi lần kết nối
+- Bấm một lần vào session đang mở là nhảy tới nó; double-click mới mở thêm phiên
 - Keepalive, nén zlib, TERM tuỳ chọn, biến môi trường, lệnh chạy tự động sau khi vào shell
 - Nhập session từ `~/.ssh/config`
 - Chế độ portable: đặt `VIBE_SSH_DATA_DIR` để mọi cấu hình nằm trong thư mục bạn chọn
@@ -73,7 +150,10 @@ Ra `.dmg`/`.app` trên macOS, `.msi`/NSIS trên Windows.
 **Khác**
 - X11 forwarding và agent forwarding
 - Keychain hệ điều hành cho mật khẩu / passphrase
-- 3 theme: tối, sáng, tương phản cao (AAA); mọi cặp màu chữ/nền ≥ 4.5:1
+- 3 theme: tối, sáng, tương phản cao; chọn thẳng từ thanh tiêu đề, không bấm mù xoay vòng
+- Theme tương phản cao dùng nền đen + xanh băng (12,3:1) thay vì vàng chói —
+  vẫn vượt xa ngưỡng AAA 7:1; vàng chỉ còn dành cho cảnh báo
+- Mọi cặp màu chữ/nền đều được tính tỉ số tương phản, không ước lượng bằng mắt
 - Bảng lệnh `⌘K` — popup duy nhất trong app, mọi thứ khác là inline
 
 ## Giới hạn còn lại

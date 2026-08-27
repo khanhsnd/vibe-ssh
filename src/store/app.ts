@@ -91,7 +91,11 @@ interface AppStore {
   focusPane: (tabId: string, paneId: string) => void;
   closePane: (tabId: string, paneId: string) => void;
 
-  openSession: (sessionId: string, target?: { tabId?: string; paneId?: string }) => Promise<void>;
+  openSession: (
+    sessionId: string,
+    target?: { tabId?: string; paneId?: string },
+    opts?: { forceNew?: boolean },
+  ) => Promise<void>;
   openLocal: (target?: { tabId?: string; paneId?: string }) => Promise<void>;
   reconnectPane: (tabId: string, paneId: string) => Promise<void>;
 
@@ -134,9 +138,27 @@ function jumpChain(session: Session, all: Session[]): Session[] {
   return chain;
 }
 
-async function hopOf(s: Session): Promise<ipc.Hop> {
-  const password = s.savePassword ? await ipc.secretGet(`pw:${s.id}`).catch(() => null) : null;
-  const keyPassphrase = s.keyPath ? await ipc.secretGet(`pp:${s.id}`).catch(() => null) : null;
+/// `warn` để người dùng biết vì sao vẫn bị hỏi mật khẩu dù đã lưu — im lặng ở
+/// đây là nguyên nhân của lỗi "lưu rồi mà vẫn hỏi".
+async function hopOf(s: Session, warn: (msg: string) => void): Promise<ipc.Hop> {
+  const who = s.name || `${s.user}@${s.host}`;
+  let password: string | null = null;
+  if (s.savePassword) {
+    try {
+      password = await ipc.secretGet(`pw:${s.id}`);
+      if (!password) warn(`Keychain không có mật khẩu đã lưu cho ${who} — hãy nhập lại và lưu.`);
+    } catch (e) {
+      warn(`Không đọc được keychain cho ${who}: ${e}`);
+    }
+  }
+  let keyPassphrase: string | null = null;
+  if (s.keyPath) {
+    // Khóa không đặt passphrase là bình thường → chỉ báo khi thực sự lỗi.
+    keyPassphrase = await ipc.secretGet(`pp:${s.id}`).catch((e) => {
+      warn(`Không đọc được passphrase của ${who}: ${e}`);
+      return null;
+    });
+  }
   return {
     label: s.name || `${s.user}@${s.host}`,
     host: s.host,
@@ -163,6 +185,14 @@ export const useApp = create<AppStore>((set, get) => {
     }
     return null;
   };
+  const findPaneBySession = (sessionId: string) => {
+    for (const t of get().tabs) {
+      const p = t.panes.find((x) => x.sessionId === sessionId && x.status !== "empty");
+      if (p) return { tab: t, pane: p };
+    }
+    return null;
+  };
+
   const findPaneByConn = (connId: string) => {
     for (const t of get().tabs) {
       const p = t.panes.find((x) => x.connId === connId);
@@ -256,10 +286,25 @@ export const useApp = create<AppStore>((set, get) => {
       mapPane(tabId, paneId, () => ({ ...emptyPane(), id: paneId }));
     },
 
-    openSession: async (sessionId, target) => {
+    openSession: async (sessionId, target, opts) => {
       const cfg = useConfig.getState();
       const s = cfg.sessions.find((x) => x.id === sessionId);
       if (!s) return;
+
+      // Session đã mở ở đâu đó → nhảy tới đúng pane thay vì mở thêm tab.
+      // Bỏ qua khi gọi vào một pane cụ thể hoặc khi người dùng chủ động
+      // yêu cầu một phiên mới.
+      if (!target && !opts?.forceNew) {
+        const open = findPaneBySession(sessionId);
+        if (open) {
+          set({ activeTab: open.tab.id });
+          mapTab(open.tab.id, (t) => ({ ...t, active: open.pane.id }));
+          if (open.pane.status === "closed" || open.pane.status === "error") {
+            await get().reconnectPane(open.tab.id, open.pane.id);
+          }
+          return;
+        }
+      }
 
       if (s.kind === "local") {
         const { tabId, paneId } = resolveTarget(target);
@@ -341,13 +386,14 @@ export const useApp = create<AppStore>((set, get) => {
       }));
       mapTab(tabId, (t) => ({ ...t, title: s.name || s.host, color: s.color }));
 
+      const warn = (msg: string) => get().toast("warn", msg);
       try {
         if (!alive) {
           const chain = jumpChain(s, cfg.sessions);
           const info = await ipc.sshConnect({
             id: connId,
-            target: await hopOf(s),
-            jumps: await Promise.all(chain.map(hopOf)),
+            target: await hopOf(s, warn),
+            jumps: await Promise.all(chain.map((h) => hopOf(h, warn))),
             keepalive: s.keepalive,
             compression: s.compression,
             x11: s.x11,

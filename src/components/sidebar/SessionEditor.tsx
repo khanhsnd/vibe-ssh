@@ -37,6 +37,10 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
   );
   const [password, setPassword] = useState("");
   const [passphrase, setPassphrase] = useState("");
+  /// `error` = không đọc được keychain → tuyệt đối không ghi đè bí mật đã lưu.
+  const [secretState, setSecretState] = useState<"loading" | "ok" | "error">(
+    isNew ? "ok" : "loading",
+  );
   const [showPw, setShowPw] = useState(false);
   const [keys, setKeys] = useState<LocalKey[]>([]);
   const [advanced, setAdvanced] = useState(false);
@@ -50,8 +54,13 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
   }, [s.x11, display]);
   useEffect(() => {
     if (isNew) return;
-    void ipc.secretGet(`pw:${s.id}`).then((v) => v && setPassword(v)).catch(() => {});
-    void ipc.secretGet(`pp:${s.id}`).then((v) => v && setPassphrase(v)).catch(() => {});
+    void Promise.all([ipc.secretGet(`pw:${s.id}`), ipc.secretGet(`pp:${s.id}`)])
+      .then(([pw, pp]) => {
+        if (pw) setPassword(pw);
+        if (pp) setPassphrase(pp);
+        setSecretState("ok");
+      })
+      .catch(() => setSecretState("error"));
     // Chỉ nạp một lần cho session đang mở.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.id]);
@@ -66,11 +75,35 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
       toast("err", "Cần nhập host");
       return null;
     }
-    const out: Session = { ...s, name, port: s.port || DEFAULT_PORT[s.kind] };
+    // Không đọc được keychain thì giữ nguyên bí mật cũ, đừng xoá nhầm.
+    const keepStored = secretState === "error";
+    const hasPassword = password.trim().length > 0;
+    const out: Session = {
+      ...s,
+      name,
+      port: s.port || DEFAULT_PORT[s.kind],
+      savePassword: hasPassword || (keepStored && s.savePassword),
+    };
+
+    // Ghi bí mật trước: nếu keychain lỗi thì không lưu gì cả, để trạng thái
+    // không rơi vào cảnh "session đã lưu nhưng mật khẩu thì không".
+    if (!keepStored) {
+      const write = async (key: string, value: string) => {
+        if (value) await ipc.secretSet(key, value);
+        // Session mới thì chưa có gì để xoá.
+        else if (!isNew) await ipc.secretDelete(key);
+      };
+      try {
+        await write(`pw:${out.id}`, password.trim());
+        await write(`pp:${out.id}`, passphrase);
+      } catch (e) {
+        // Nuốt lỗi ở đây chính là lý do "đã lưu mà vẫn hỏi mật khẩu".
+        toast("err", `Không lưu được vào keychain: ${e}`);
+        return null;
+      }
+    }
+
     cfg.upsertSession(out);
-    if (out.savePassword && password) await ipc.secretSet(`pw:${out.id}`, password).catch(() => {});
-    if (!out.savePassword) await ipc.secretDelete(`pw:${out.id}`).catch(() => {});
-    if (passphrase) await ipc.secretSet(`pp:${out.id}`, passphrase).catch(() => {});
     return out;
   };
 
@@ -222,7 +255,7 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
                     <Field
                       value={passphrase} onChange={setPassphrase}
                       type={showPw ? "text" : "password"}
-                      placeholder="để trống nếu khóa không mã hóa"
+                      placeholder="để trống nếu khóa không mã hoá"
                       right={<IBtn icon={showPw ? "eyeOff" : "eye"} tip="Hiện/ẩn" size="sm" onClick={() => setShowPw((v) => !v)} />}
                     />
                   </Row>
@@ -235,17 +268,16 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
                     <Field
                       value={password} onChange={setPassword}
                       type={showPw ? "text" : "password"}
-                      placeholder="hỏi khi kết nối nếu để trống"
+                      placeholder={secretState === "loading" ? "đang đọc keychain…" : "để trống = hỏi mỗi lần"}
                       right={<IBtn icon={showPw ? "eyeOff" : "eye"} tip="Hiện/ẩn" size="sm" onClick={() => setShowPw((v) => !v)} />}
                     />
                   </Row>
                   <Row label="">
-                    <Switch
-                      checked={s.savePassword}
-                      onChange={(v) => set("savePassword", v)}
-                      label="Lưu vào keychain hệ thống"
-                      tip="macOS Keychain / Windows Credential Manager — không nằm trong file cấu hình"
-                    />
+                    <span className="hint">
+                      Nhập mật khẩu = lưu vào keychain hệ thống (macOS Keychain / Windows
+                      Credential Manager), không nằm trong file cấu hình. Để trống = hỏi mỗi
+                      lần kết nối.
+                    </span>
                   </Row>
                 </>
               )}

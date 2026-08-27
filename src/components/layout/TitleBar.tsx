@@ -4,9 +4,16 @@ import { isMac, modKey } from "@/lib/util";
 import { useApp } from "@/store/app";
 import { useConfig } from "@/store/config";
 import { Icon } from "../ui/Icon";
+import { Menu, Popover, usePopover } from "../ui/Popover";
 import { IBtn } from "../ui/primitives";
 
-const NEXT_THEME = { dark: "light", light: "contrast", contrast: "dark", system: "dark" } as const;
+const THEMES = [
+  { value: "dark", label: "Tối", icon: "moon" },
+  { value: "light", label: "Sáng", icon: "sun" },
+  { value: "contrast", label: "Tương phản cao", icon: "contrast" },
+  { value: "system", label: "Theo hệ thống", icon: "cpu" },
+] as const;
+
 const THEME_ICON = { dark: "moon", light: "sun", contrast: "contrast", system: "cpu" } as const;
 
 export function TitleBar() {
@@ -14,6 +21,7 @@ export function TitleBar() {
   const { settings, patchSettings } = useConfig();
   const { setPalette, activePane, setSftpVisible } = useApp();
   const [maximized, setMaximized] = useState(false);
+  const themePop = usePopover<null>();
   const cur = activePane();
   const showSftp = settings.showSftp;
 
@@ -52,9 +60,24 @@ export function TitleBar() {
       />
       <IBtn
         icon={THEME_ICON[settings.theme]}
-        tip={`Theme: ${settings.theme} → ${NEXT_THEME[settings.theme]}`}
-        onClick={() => patchSettings({ theme: NEXT_THEME[settings.theme] })}
+        tip="Chọn theme"
+        on={!!themePop.state}
+        onClick={(e) => themePop.openAt(e.currentTarget, null)}
       />
+
+      {themePop.state && (
+        <Popover anchor={themePop.state.anchor} onClose={themePop.close} width={186}>
+          <Menu
+            onClose={themePop.close}
+            items={THEMES.map((t) => ({
+              label: t.label,
+              icon: t.icon,
+              shortcut: settings.theme === t.value ? "✓" : undefined,
+              onPick: () => patchSettings({ theme: t.value }),
+            }))}
+          />
+        </Popover>
+      )}
 
       {!mac && (
         <div className="win-controls">

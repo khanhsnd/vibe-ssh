@@ -140,7 +140,7 @@ pub async fn read_text(
     let cap = max_bytes.clamp(1024, 4 * 1024 * 1024);
 
     let mut file = sftp.open(path).await?;
-    let mut buf = vec![0u8; cap as usize];
+    let mut buf = vec![0u8; cap as usize + 1];
     let mut filled = 0usize;
     while filled < buf.len() {
         let n = file.read(&mut buf[filled..]).await?;
@@ -150,7 +150,31 @@ pub async fn read_text(
         filled += n;
     }
     buf.truncate(filled);
-    Ok((String::from_utf8_lossy(&buf).into_owned(), size > filled as u64))
+    let cut = filled as u64 > cap || size > filled as u64;
+    buf.truncate(cap as usize);
+    if buf.contains(&0) {
+        crate::bail!("File nhị phân không hỗ trợ chỉnh sửa văn bản");
+    }
+    let text = match std::str::from_utf8(&buf) {
+        Ok(text) => text.to_owned(),
+        Err(err) if cut && err.error_len().is_none() => {
+            String::from_utf8(buf[..err.valid_up_to()].to_vec()).unwrap()
+        }
+        Err(_) => crate::bail!("Chỉ hỗ trợ file văn bản UTF-8"),
+    };
+    Ok((text, cut))
+}
+
+/// Lưu nội dung vào file hiện có, giữ nguyên quyền truy cập.
+pub async fn write_text(
+    state: &Arc<AppState>, conn_id: &str, path: &str, text: &str,
+) -> Result<()> {
+    use russh_sftp::protocol::OpenFlags;
+    let sftp = state.conn(conn_id).await?.sftp().await?;
+    let mut file = sftp.open_with_flags(path, OpenFlags::WRITE | OpenFlags::TRUNCATE).await?;
+    file.write_all(text.as_bytes()).await?;
+    file.shutdown().await?;
+    Ok(())
 }
 
 pub async fn read_link(state: &Arc<AppState>, conn_id: &str, path: &str) -> Result<String> {

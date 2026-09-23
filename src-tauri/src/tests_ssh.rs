@@ -365,6 +365,19 @@ fn sftp_round_trip() {
         assert_eq!(full.len(), payload.len(), "đọc hết file");
         assert!(!cut);
 
+        // Lưu nội dung ngắn hơn phải cắt phần dư và giữ quyền file.
+        let edited = "Nội dung đã sửa\r\n";
+        sftp::write_text(&state, &id, &remote, edited).await.expect("write_text");
+        assert_eq!(std::fs::read(&remote).unwrap(), edited.as_bytes());
+        let listing = sftp::list(&state, &id, &base_s).await.unwrap();
+        assert_eq!(listing.entries.iter().find(|e| e.path == remote).unwrap().mode & 0o777, 0o600);
+        sftp::write_text(&state, &id, &remote, "").await.expect("save empty file");
+        assert!(std::fs::read(&remote).unwrap().is_empty());
+        std::fs::write(&remote, [0xff, 0xfe]).unwrap();
+        assert!(sftp::read_text(&state, &id, &remote, 1024).await.is_err());
+        std::fs::write(&remote, b"binary\0data").unwrap();
+        assert!(sftp::read_text(&state, &id, &remote, 1024).await.is_err());
+
         // rename + remove đệ quy
         let renamed = format!("{base_s}/renamed.bin");
         sftp::rename(&state, &id, &remote, &renamed).await.expect("rename");

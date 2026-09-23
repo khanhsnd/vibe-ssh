@@ -18,11 +18,27 @@ const blank = (sessionId: string): TunnelDef => ({
 
 export function TunnelsPanel() {
   const cfg = useConfig();
-  const { tunnels, startTunnel, stopTunnel, connBySession } = useApp();
+  const { tunnels, startTunnel, stopTunnel, connBySession, conns, openSession, setEditing, toast } = useApp();
   const [edit, setEdit] = useState<TunnelDef | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const pop = usePopover<TunnelDef>();
 
   const sshSessions = cfg.sessions.filter((s) => s.kind === "ssh");
+
+  const save = () => {
+    if (!edit) return;
+    const portValid = (port: number, min: number) => Number.isInteger(port) && port >= min && port <= 65535;
+    if (!sshSessions.some((s) => s.id === edit.sessionId)) return toast("err", "Chọn một session SSH");
+    if (!edit.bindHost.trim() || (edit.kind !== "dynamic" && !edit.destHost.trim())) return toast("err", "Cần nhập địa chỉ cổng mở và đích");
+    if (!portValid(edit.bindPort, 0) || (edit.kind !== "dynamic" && !portValid(edit.destPort, 1))) return toast("err", "Cổng không hợp lệ (1–65535; cổng mở có thể là 0 để tự chọn)");
+    cfg.upsertTunnel({ ...edit, name: edit.name.trim(), bindHost: edit.bindHost.trim(), destHost: edit.destHost.trim() });
+    setEdit(null);
+  };
+
+  const run = async (t: TunnelDef) => {
+    setBusy(t.id);
+    try { await startTunnel(t.id); } finally { setBusy(null); }
+  };
 
   if (edit) {
     const dynamic = edit.kind === "dynamic";
@@ -35,6 +51,14 @@ export function TunnelsPanel() {
         <div className="side-body">
           <div className="editor">
             <div className="grp">
+              <Row label="Mẫu nhanh" stack>
+                <div className="tunnel-actions">
+                  {[{ name: "PostgreSQL", port: 5432 }, { name: "MySQL", port: 3306 }, { name: "Web", port: 8080 }].map((preset) => (
+                    <Btn small key={preset.name} onClick={() => setEdit({ ...edit, name: preset.name, kind: "local", bindPort: preset.port, destPort: preset.port })}>{preset.name}</Btn>
+                  ))}
+                  <Btn small onClick={() => setEdit({ ...edit, name: "SOCKS5", kind: "dynamic", bindPort: 1080 })}>SOCKS5</Btn>
+                </div>
+              </Row>
               <Row label="Tên">
                 <Field value={edit.name} onChange={(v) => setEdit({ ...edit, name: v })} placeholder="ví dụ: db-prod" />
               </Row>
@@ -52,10 +76,12 @@ export function TunnelsPanel() {
                   options={(Object.keys(KIND_LABEL) as TunnelDef["kind"][]).map((k) => ({ value: k, label: KIND_LABEL[k] }))}
                 />
               </Row>
+              <TunnelRoute tunnel={edit} server={sshSessions.find((s) => s.id === edit.sessionId)?.host} />
               <Row label={edit.kind === "remote" ? "Bind (xa)" : "Bind (máy này)"}>
                 <Field mono value={edit.bindHost} onChange={(v) => setEdit({ ...edit, bindHost: v })} placeholder="127.0.0.1" />
                 <NumField value={edit.bindPort} onChange={(v) => setEdit({ ...edit, bindPort: v })} min={0} max={65535} width={72} />
               </Row>
+              <div className="hint">Cổng mở = 0: tự chọn cổng trống khi chạy.</div>
               {!dynamic && (
                 <Row label={edit.kind === "remote" ? "Đích (máy này)" : "Đích (từ server)"}>
                   <Field mono value={edit.destHost} onChange={(v) => setEdit({ ...edit, destHost: v })} />
@@ -82,7 +108,7 @@ export function TunnelsPanel() {
         </div>
         <div className="side-foot" style={{ display: "flex", gap: 6 }}>
           <Btn variant="primary" small icon="save"
-            onClick={() => { cfg.upsertTunnel(edit); setEdit(null); }}>Lưu</Btn>
+            onClick={save}>Lưu</Btn>
           <div style={{ flex: 1 }} />
           <Btn variant="ghost" small onClick={() => setEdit(null)}>Hủy</Btn>
         </div>
@@ -93,7 +119,8 @@ export function TunnelsPanel() {
   return (
     <>
       <div className="side-head">
-        <span className="side-title">Tunnels</span>
+        <span className="side-title">SSH Tunnels</span>
+        <Chip tone="ok">{Object.keys(tunnels).length} đang chạy</Chip>
         <IBtn
           icon="plus" tip="Tunnel mới" size="sm"
           disabled={sshSessions.length === 0}
@@ -101,6 +128,12 @@ export function TunnelsPanel() {
         />
       </div>
       <div className="side-body">
+        <div className="grp">
+          <p className="hint">Mở cổng tới database, web nội bộ hoặc tạo proxy qua SSH.</p>
+          <Btn icon="plus" variant="primary" small onClick={() => sshSessions.length ? setEdit(blank(sshSessions[0].id)) : setEditing("new")}>
+            {sshSessions.length ? "Thêm tunnel" : "Tạo session SSH"}
+          </Btn>
+        </div>
         {cfg.tunnels.length === 0 && (
           <div className="empty">
             <Icon n="plug" s={28} w={1.3} />
@@ -112,29 +145,31 @@ export function TunnelsPanel() {
           {cfg.tunnels.map((t) => {
             const live = tunnels[t.id];
             const session = cfg.sessions.find((s) => s.id === t.sessionId);
-            const connected = !!connBySession[t.sessionId];
+            const connected = !!conns[connBySession[t.sessionId]];
             return (
-              <div key={t.id} className="list-item">
-                <span style={{ color: live ? "var(--ok)" : "var(--text-3)", display: "grid" }}>
+              <div key={t.id} className="tunnel-card">
+                <div className="tunnel-actions">
                   <Icon n={t.kind === "dynamic" ? "globe" : "plug"} s={15} />
-                </span>
-                <div className="main">
-                  <div className="t1">{t.name || KIND_LABEL[t.kind]}</div>
-                  <div className="t2">
-                    {t.kind === "dynamic"
-                      ? `${t.bindHost}:${live?.port ?? t.bindPort} → SOCKS5`
-                      : `${t.bindHost}:${live?.port ?? t.bindPort} → ${t.destHost}:${t.destPort}`}
-                    {session && ` · ${session.name || session.host}`}
-                  </div>
+                  <strong className="tunnel-name">{t.name || KIND_LABEL[t.kind]}</strong>
+                  {live ? <Chip tone="ok">Đang chạy</Chip> : <Chip tone={connected ? undefined : "warn"}>{connected ? "Đã dừng" : "Chưa kết nối"}</Chip>}
                 </div>
-                {live ? <Chip tone="ok">chạy</Chip> : connected ? <Chip>tắt</Chip> : <Chip tone="warn">chưa nối</Chip>}
-                {live ? (
-                  <IBtn icon="stop" tip="Dừng" size="sm" onClick={() => void stopTunnel(t.id)} />
-                ) : (
-                  <IBtn icon="play" tip="Chạy" size="sm" disabled={!connected} onClick={() => void startTunnel(t.id)} />
-                )}
-                <IBtn icon="edit" tip="Sửa" size="sm" onClick={() => setEdit(t)} />
-                <IBtn icon="trash" tip="Xóa" size="sm" danger onClick={(e) => pop.open(e, t)} />
+                <div className="hint">{KIND_LABEL[t.kind]} · {session?.name || session?.host || "Session đã bị xóa"}{t.autoStart ? " · Tự chạy" : ""}</div>
+                <TunnelRoute tunnel={t} server={session?.host} port={live?.port} />
+                <div className="tunnel-actions">
+                  {live ? (
+                    <Btn small icon="stop" onClick={() => void stopTunnel(t.id)}>Dừng</Btn>
+                  ) : connected ? (
+                    <Btn small icon="play" disabled={busy !== null} onClick={() => void run(t)}>{busy === t.id ? "Đang mở…" : "Chạy tunnel"}</Btn>
+                  ) : (
+                    <Btn small icon="server" disabled={!session || busy !== null} onClick={async () => {
+                      setBusy(t.id);
+                      try { await openSession(t.sessionId); } finally { setBusy(null); }
+                    }}>{busy === t.id ? "Đang kết nối…" : "Kết nối SSH"}</Btn>
+                  )}
+                  <div style={{ flex: 1 }} />
+                  <IBtn icon="edit" tip={live ? "Dừng tunnel trước khi sửa" : "Sửa"} size="sm" disabled={!!live || busy === t.id} onClick={() => setEdit(t)} />
+                  <IBtn icon="trash" tip="Xóa" size="sm" disabled={busy === t.id} danger onClick={(e) => pop.open(e, t)} />
+                </div>
               </div>
             );
           })}
@@ -153,5 +188,16 @@ export function TunnelsPanel() {
         </Popover>
       )}
     </>
+  );
+}
+
+function TunnelRoute({ tunnel: t, server, port }: { tunnel: TunnelDef; server?: string; port?: number }) {
+  const endpoint = (host: string, value: number) => `${host.includes(":") ? `[${host}]` : host}:${value || "tự chọn"}`;
+  return (
+    <div className="tunnel-route">
+      <div><span>{t.kind === "remote" ? "Cổng trên server" : "Cổng trên máy bạn"}</span><code>{endpoint(t.bindHost, port ?? t.bindPort)}</code></div>
+      <div className="tunnel-hop">↓ SSH · {server || "Chọn session"}</div>
+      <div><span>{t.kind === "dynamic" ? "Proxy SOCKS5" : t.kind === "remote" ? "Đích từ máy bạn" : "Đích từ server"}</span><code>{t.kind === "dynamic" ? "Internet / mạng phía server" : endpoint(t.destHost, t.destPort)}</code></div>
+    </div>
   );
 }

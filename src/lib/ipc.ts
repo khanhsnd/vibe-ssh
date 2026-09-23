@@ -78,6 +78,8 @@ export const sftpReadlink = (connId: string, path: string) => invoke<string>("sf
 /// Trả về [nội dung, đã bị cắt bớt].
 export const sftpReadText = (connId: string, path: string, maxBytes = 512 * 1024) =>
   invoke<[string, boolean]>("sftp_read_text", { connId, path, maxBytes });
+export const sftpWriteText = (connId: string, path: string, text: string) =>
+  invoke<void>("sftp_write_text", { connId, path, text });
 export const sftpDownload = (connId: string, remote: string, local: string, xferId: string) =>
   invoke<void>("sftp_download", { connId, remote, local, xferId });
 export const sftpUpload = (connId: string, local: string, remote: string, xferId: string) =>

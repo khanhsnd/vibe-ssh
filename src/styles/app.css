@@ -483,3 +483,17 @@ kbd {
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .split-h { display: flex; min-height: 0; flex: 1; }
 .split-v { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+
+/* SSH forwarding paths stay readable even in a narrow sidebar. */
+.tunnel-card { margin: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); display: flex; flex-direction: column; gap: 10px; }
+.tunnel-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tunnel-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tunnel-route { margin: 10px 0; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
+.tunnel-route span { display: block; color: var(--text-3); font-size: var(--fs-xs); margin-bottom: 4px; }
+.tunnel-route code { display: block; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+.tunnel-hop { color: var(--accent); font-size: var(--fs-xs); padding: 10px 0; overflow-wrap: anywhere; }
+
+.file-editor {
+  min-height: 180px; width: 100%; resize: vertical;
+  border: 0; border-radius: 0; background: var(--bg); outline: none;
+}

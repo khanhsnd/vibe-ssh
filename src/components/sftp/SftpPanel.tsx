@@ -28,7 +28,9 @@ export function SftpPanel({ connId, termId }: { connId: string; termId?: string 
   const droppingRef = useRef(false);
   const pathRef = useRef("");
   const [mode, setMode] = useState("");
-  const [peek, setPeek] = useState<{ name: string; text: string; cut: boolean } | null>(null);
+  const [peek, setPeek] = useState<{ name: string; path: string; text: string; original: string; cut: boolean } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const editorBusy = useRef(false);
   const pop = usePopover<Ctx>();
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -158,12 +160,52 @@ export function SftpPanel({ connId, termId }: { connId: string; termId?: string 
     }
   };
 
+  const canDiscard = async () => {
+    if (!peek || peek.text === peek.original) return true;
+    const { confirm } = await import("@tauri-apps/plugin-dialog");
+    return confirm("Nội dung chưa được lưu. Bỏ thay đổi?", {
+      title: "Chưa lưu file", kind: "warning", okLabel: "Bỏ thay đổi", cancelLabel: "Tiếp tục sửa",
+    });
+  };
+
   const preview = async (e: SftpEntry) => {
+    if (editorBusy.current) return;
+    editorBusy.current = true;
     try {
-      const [text, cut] = await ipc.sftpReadText(connId, e.path);
-      setPeek({ name: e.name, text, cut });
+      if (!await canDiscard()) return;
+      const [text, cut] = await ipc.sftpReadText(connId, e.path, 4 * 1024 * 1024);
+      setPeek({ name: e.name, path: e.path, text, original: text, cut });
     } catch (err) {
       toast("err", `Đọc ${e.name}: ${err}`);
+    } finally {
+      editorBusy.current = false;
+    }
+  };
+
+  const saveFile = async () => {
+    if (!peek || peek.cut || peek.text === peek.original || editorBusy.current) return;
+    editorBusy.current = true;
+    setSaving(true);
+    try {
+      await ipc.sftpWriteText(connId, peek.path, peek.text);
+      setPeek({ ...peek, original: peek.text });
+      toast("ok", `Đã lưu ${peek.name}`);
+      void load(pathRef.current);
+    } catch (err) {
+      toast("err", `Lưu ${peek.name}: ${err}`);
+    } finally {
+      editorBusy.current = false;
+      setSaving(false);
+    }
+  };
+
+  const closeEditor = async () => {
+    if (editorBusy.current) return;
+    editorBusy.current = true;
+    try {
+      if (await canDiscard()) setPeek(null);
+    } finally {
+      editorBusy.current = false;
     }
   };
 
@@ -301,9 +343,7 @@ export function SftpPanel({ connId, termId }: { connId: string; termId?: string 
                 else if (e.kind === "link") void ipc.sftpReadlink(connId, e.path)
                   .then((t) => toast("info", `${e.name} → ${t}`))
                   .catch(() => {});
-                // File vừa phải thì xem ngay; file lớn thì tải xuống.
-                else if (e.size <= 512 * 1024) void preview(e);
-                else void download([e]);
+                else void preview(e);
               }}
               onContextMenu={(ev) => {
                 ev.preventDefault();
@@ -332,7 +372,7 @@ export function SftpPanel({ connId, termId }: { connId: string; termId?: string 
             {baseName(selected[0].path)} · {selected[0].modeStr} · {selected[0].user ?? selected[0].uid ?? "?"}:{selected[0].group ?? selected[0].gid ?? "?"}
           </span>
           {selected[0].kind === "file" && (
-            <IBtn icon="eye" tip="Xem nội dung" size="sm" onClick={() => void preview(selected[0])} />
+            <IBtn icon="edit" tip="Chỉnh sửa nội dung" size="sm" onClick={() => void preview(selected[0])} />
           )}
           <IBtn icon="edit" tip="Đổi tên" size="sm" onClick={() => setRenaming(selected[0].path)} />
           <IBtn
@@ -351,12 +391,30 @@ export function SftpPanel({ connId, termId }: { connId: string; termId?: string 
             <span className="mono" style={{ flex: 1, fontSize: "var(--fs-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {peek.name}
             </span>
-            {peek.cut && <Chip tone="warn">cắt bớt</Chip>}
+            {peek.cut ? <Chip tone="warn">Quá 4 MB · chỉ xem</Chip> : peek.text !== peek.original && <Chip tone="warn">Chưa lưu</Chip>}
+            <Btn small variant="primary" disabled={saving || peek.cut || peek.text === peek.original} onClick={() => void saveFile()}>
+              {saving ? "Đang lưu…" : "Lưu"}
+            </Btn>
             <IBtn icon="copy" tip="Copy nội dung" size="sm"
               onClick={() => { void navigator.clipboard.writeText(peek.text); toast("ok", "Đã copy nội dung"); }} />
-            <IBtn icon="x" tip="Đóng" size="sm" onClick={() => setPeek(null)} />
+            <IBtn icon="x" tip="Đóng" size="sm" disabled={saving} onClick={() => void closeEditor()} />
           </div>
-          <pre className="peek-body">{peek.text}</pre>
+          <textarea
+            className="peek-body file-editor"
+            aria-label={`Chỉnh sửa ${peek.name}`}
+            spellCheck={false}
+            autoFocus
+            readOnly={peek.cut || saving}
+            value={peek.text}
+            onChange={(e) => setPeek({ ...peek, text: e.target.value })}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+                e.preventDefault();
+                void saveFile();
+              }
+            }}
+          />
         </div>
       )}
 

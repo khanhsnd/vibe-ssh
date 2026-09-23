@@ -233,6 +233,11 @@ pub async fn sftp_read_text(
 }
 
 #[tauri::command]
+pub async fn sftp_write_text(state: St<'_>, conn_id: String, path: String, text: String) -> Result<()> {
+    sftp::write_text(state.inner(), &conn_id, &path, &text).await
+}
+
+#[tauri::command]
 pub async fn sftp_readlink(state: St<'_>, conn_id: String, path: String) -> Result<String> {
     sftp::read_link(state.inner(), &conn_id, &path).await
 }

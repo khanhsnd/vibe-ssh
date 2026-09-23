@@ -20,7 +20,7 @@ const BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
 const AUTHS: { value: AuthMethod; label: string; tip: string }[] = [
   { value: "agent", label: "agent", tip: "ssh-agent đang chạy trên máy" },
-  { value: "key", label: "khóa", tip: "khóa riêng chỉ định bên dưới" },
+  { value: "key", label: "File PEM / khóa riêng", tip: "khóa riêng chỉ định bên dưới" },
   { value: "password", label: "mật khẩu", tip: "mật khẩu (hỏi khi kết nối nếu không lưu)" },
   { value: "interactive", label: "tương tác", tip: "keyboard-interactive, ví dụ OTP/2FA" },
 ];
@@ -75,6 +75,10 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
       toast("err", "Cần nhập host");
       return null;
     }
+    if (secretState === "loading") {
+      toast("warn", "Đang đọc keychain, vui lòng chờ");
+      return null;
+    }
     // Không đọc được keychain thì giữ nguyên bí mật cũ, đừng xoá nhầm.
     const keepStored = secretState === "error";
     const hasPassword = password.trim().length > 0;
@@ -107,10 +111,21 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
     return out;
   };
 
+  const selectKey = (path: string) => setS((prev) => ({
+    ...prev, keyPath: path, auth: ["key", ...prev.auth.filter((method) => method !== "key")],
+  }));
+
   const pickFile = async (kind: "key" | "dir") => {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const res = await open({ directory: kind === "dir", multiple: false }).catch(() => null);
-    if (typeof res === "string") kind === "key" ? set("keyPath", res) : set("cwd", res);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const res = await open({
+        title: kind === "key" ? "Chọn file PEM / khóa riêng SSH" : "Chọn thư mục",
+        directory: kind === "dir", multiple: false,
+      });
+      if (typeof res === "string") kind === "key" ? selectKey(res) : set("cwd", res);
+    } catch (e) {
+      toast("err", `Không mở được hộp chọn file: ${e}`);
+    }
   };
 
   const toggleAuth = (m: AuthMethod) => {
@@ -204,6 +219,12 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
 
           {isSsh && (
             <Group title="Xác thực" icon="key">
+              <Row label="File PEM" stack>
+                <Btn icon="folder" onClick={() => void pickFile("key")}>
+                  {s.keyPath ? "Đổi file PEM / khóa riêng" : "Chọn file PEM / khóa riêng"}
+                </Btn>
+                <span className="hint">Chọn khóa trên máy (.pem hoặc OpenSSH). Khóa được ưu tiên khi kết nối; file gốc vẫn nằm trên máy bạn.</span>
+              </Row>
               <Row label="Thứ tự thử" stack tip="Thử lần lượt từ trên xuống, dừng khi thành công">
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                   {AUTHS.map((a) => {
@@ -243,7 +264,7 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
                             type="button"
                             className="chip"
                             data-tip={k.fingerprint ?? k.path}
-                            onClick={() => set("keyPath", k.path)}
+                            onClick={() => selectKey(k.path)}
                           >
                             {k.name}
                           </button>

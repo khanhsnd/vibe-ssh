@@ -59,6 +59,7 @@ pub fn run() {
             commands::sftp_remove,
             commands::sftp_readlink,
             commands::sftp_read_text,
+            commands::sftp_write_text,
             commands::sftp_download,
             commands::sftp_upload,
             commands::tunnel_start,

@@ -4,6 +4,7 @@ export type SessionKind = "ssh" | "local" | "telnet" | "serial" | "mosh" | "rdp"
 export type AuthMethod = "agent" | "key" | "password" | "interactive";
 export type ThemeName = "dark" | "light" | "contrast" | "system";
 export type PaneLayout = "single" | "cols" | "rows" | "grid";
+export type Stage = "prod" | "staging" | "dev";
 
 export interface Folder {
   id: string;
@@ -19,8 +20,12 @@ export interface Session {
   folderId: string | null;
   kind: SessionKind;
   sort: number;
-  color?: string;
+  /** Môi trường (prod/staging/dev): tô màu tab và gắn tag trong danh sách. */
+  stage?: Stage;
   note?: string;
+  /** Tạo từ ô kết nối nhanh, chưa được người dùng lưu; bỏ đi khi mở lại app. */
+  quick?: boolean;
+  lastUsed?: number;
 
   // SSH / telnet
   host: string;
@@ -70,6 +75,8 @@ export interface TunnelDef {
   bindPort: number;
   destHost: string;
   destPort: number;
+  /** File PEM / khóa riêng dùng riêng cho tunnel này, thay khóa của session. */
+  keyPath?: string;
   /** Chạy ngay khi mở app. */
   autoStart: boolean;
   /** Rớt kết nối thì tự nối lại thay vì dừng hẳn. */

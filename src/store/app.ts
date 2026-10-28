@@ -1,7 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import * as ipc from "@/lib/ipc";
-import type { ConnInfo, PaneLayout, Session } from "@/lib/types";
+import { newSession, type ConnInfo, type Stage, type PaneLayout, type Session } from "@/lib/types";
+import { parseAddress, withKey } from "@/lib/kinds";
 import { useConfig } from "./config";
 
 export type PaneStatus = "empty" | "connecting" | "ready" | "closed" | "error";
@@ -23,7 +24,7 @@ export interface Tab {
   layout: PaneLayout;
   panes: Pane[];
   active: string;
-  color?: string;
+  stage?: Stage;
 }
 
 export interface Ask {
@@ -106,6 +107,11 @@ interface AppStore {
     opts?: { forceNew?: boolean },
   ) => Promise<void>;
   openLocal: (target?: { tabId?: string; paneId?: string }) => Promise<void>;
+  /// Kết nối thẳng tới `user@host:port`, tạo session tạm nếu chưa có.
+  quickConnect: (address: string, target?: { tabId?: string; paneId?: string }) => Promise<void>;
+  saveQuick: (sessionId: string, name: string) => void;
+  importSshConfig: () => Promise<void>;
+  discardQuick: (sessionId: string) => void;
   reconnectPane: (tabId: string, paneId: string) => Promise<void>;
 
   answerAsk: (askId: string, value: unknown) => Promise<void>;
@@ -293,6 +299,7 @@ export const useApp = create<AppStore>((set, get) => {
       const cfg = useConfig.getState();
       const s = cfg.sessions.find((x) => x.id === sessionId);
       if (!s) return;
+      cfg.upsertSession({ ...s, lastUsed: Date.now() });
 
       // Session đã mở ở đâu đó → nhảy tới đúng pane thay vì mở thêm tab.
       // Bỏ qua khi gọi vào một pane cụ thể hoặc khi người dùng chủ động
@@ -316,7 +323,7 @@ export const useApp = create<AppStore>((set, get) => {
           ...p, termId, sessionId, connId: null, kind: "local",
           title: s.name || "Shell", status: "ready", detail: "",
         }));
-        mapTab(tabId, (t) => ({ ...t, title: s.name || "Shell", color: s.color }));
+        mapTab(tabId, (t) => ({ ...t, title: s.name || "Shell", stage: s.stage }));
         try {
           await ipc.ptyOpen({
             termId, shell: s.shell || undefined, args: [], cwd: s.cwd || undefined,
@@ -340,7 +347,7 @@ export const useApp = create<AppStore>((set, get) => {
           ...p, termId, sessionId, connId: null, kind: "local",
           title: label, status: "ready", detail: "",
         }));
-        mapTab(tabId, (t) => ({ ...t, title: label, color: s.color }));
+        mapTab(tabId, (t) => ({ ...t, title: label, stage: s.stage }));
         const logPath = s.logToFile ? logPath0(cfg.settings.logDir, label) : undefined;
         try {
           if (s.kind === "telnet") {
@@ -387,7 +394,7 @@ export const useApp = create<AppStore>((set, get) => {
         title: s.name || `${s.user}@${s.host}`,
         status: "connecting", detail: alive ? "dùng lại kết nối" : "đang kết nối…",
       }));
-      mapTab(tabId, (t) => ({ ...t, title: s.name || s.host, color: s.color }));
+      mapTab(tabId, (t) => ({ ...t, title: s.name || s.host, stage: s.stage }));
 
       try {
         if (!alive) {
@@ -433,6 +440,52 @@ export const useApp = create<AppStore>((set, get) => {
       } catch (e) {
         mapPane(tabId, paneId, (p) => ({ ...p, status: "error", detail: String(e) }));
       }
+    },
+
+    quickConnect: async (address, target) => {
+      const a = parseAddress(address);
+      if (!a) {
+        get().toast("err", "Địa chỉ cần có dạng user@host hoặc user@host:port");
+        return;
+      }
+      const cfg = useConfig.getState();
+      const known = cfg.sessions.find(
+        (s) => s.kind === "ssh" && s.host === a.host && s.port === a.port && s.user === a.user,
+      );
+      const s = known ?? newSession({ ...a, name: a.host, quick: true });
+      if (!known) cfg.upsertSession(s);
+      await get().openSession(s.id, target);
+    },
+
+    saveQuick: (sessionId, name) => {
+      const cfg = useConfig.getState();
+      const s = cfg.sessions.find((x) => x.id === sessionId);
+      if (s) cfg.upsertSession({ ...s, name: name.trim() || s.host, quick: false });
+    },
+
+    importSshConfig: async () => {
+      const cfg = useConfig.getState();
+      const hosts = await ipc.sshConfigImport().catch(() => []);
+      if (!hosts.length) return get().toast("warn", "Không tìm thấy mục nào trong ~/.ssh/config");
+      const byName = new Set(cfg.sessions.map((s) => s.name));
+      const fresh = hosts.filter((h) => !byName.has(h.name));
+      if (!fresh.length) return get().toast("info", "Tất cả đã có sẵn");
+      const folderId = cfg.folders.find((f) => f.name === "Nhập từ ~/.ssh/config")?.id
+        ?? cfg.addFolder("Nhập từ ~/.ssh/config");
+      for (const h of fresh) {
+        cfg.upsertSession(newSession({
+          name: h.name, host: h.host || h.name, port: h.port || 22,
+          user: h.user, keyPath: h.identityFile, folderId,
+        }));
+      }
+      get().toast("ok", `Đã nhập ${fresh.length} session`);
+    },
+
+    discardQuick: (sessionId) => {
+      useConfig.getState().removeSession(sessionId);
+      // Mật khẩu đã lưu trong lúc kết nối thuộc về session tạm này.
+      void ipc.secretDelete(`pw:${sessionId}`).catch(() => {});
+      void ipc.secretDelete(`pp:${sessionId}`).catch(() => {});
     },
 
     reconnectPane: async (tabId, paneId) => {
@@ -512,7 +565,10 @@ export const useApp = create<AppStore>((set, get) => {
       try {
         await ipc.tunnelStart({
           id: t.id, kind: t.kind,
-          connect: { ...connectOpts(tunnelConnId(t.id), s, cfg.sessions), keepalive: TUNNEL_KEEPALIVE },
+          connect: {
+            ...connectOpts(tunnelConnId(t.id), t.keyPath ? withKey(s, t.keyPath) : s, cfg.sessions),
+            keepalive: TUNNEL_KEEPALIVE,
+          },
           bindHost: t.bindHost, bindPort: t.bindPort,
           destHost: t.destHost, destPort: t.destPort,
           autoReconnect: t.autoReconnect,

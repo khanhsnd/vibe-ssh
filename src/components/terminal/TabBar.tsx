@@ -1,4 +1,5 @@
 import { useApp } from "@/store/app";
+import { STAGE_META } from "@/lib/kinds";
 import type { PaneLayout } from "@/lib/types";
 import { Icon } from "../ui/Icon";
 import { IBtn, Seg } from "../ui/primitives";
@@ -11,7 +12,7 @@ const LAYOUTS: { value: PaneLayout; icon: string; tip: string }[] = [
 ];
 
 export function TabBar() {
-  const { tabs, activeTab, selectTab, closeTab, newTab, setLayout, broadcast, toggleBroadcast } = useApp();
+  const { tabs, activeTab, selectTab, closeTab, newTab, setLayout, broadcast, toggleBroadcast, reconnectPane } = useApp();
   const tab = tabs.find((t) => t.id === activeTab);
 
   return (
@@ -24,17 +25,34 @@ export function TabBar() {
             if (p.status === "ready" && acc === "") return "ok";
             return acc;
           }, "");
+          const down = t.panes.filter((p) => p.sessionId && (p.status === "closed" || p.status === "error"));
+          const stage = t.stage ? STAGE_META[t.stage] : null;
           return (
             <div
               key={t.id}
-              className={`tab ${t.id === activeTab ? "active" : ""}`}
+              className={`tab ${t.id === activeTab ? "active" : ""} ${stage ? "staged" : ""}`}
+              style={stage ? ({ "--stage": stage.color } as React.CSSProperties) : undefined}
               onMouseDown={(e) => {
                 if (e.button === 1) closeTab(t.id);
                 else selectTab(t.id);
               }}
             >
-              <span className={`dot ${worst}`} style={t.color ? { background: t.color } : undefined} />
+              <span className={`dot ${worst}`} />
               <span className="nm">{t.title}</span>
+              {down.length > 0 && (
+                <span
+                  className="x re"
+                  role="button"
+                  aria-label="Nối lại"
+                  data-tip="Mất kết nối — nối lại"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    down.forEach((p) => void reconnectPane(t.id, p.id));
+                  }}
+                >
+                  <Icon n="refresh" s={11} />
+                </span>
+              )}
               <span
                 className="x"
                 role="button"

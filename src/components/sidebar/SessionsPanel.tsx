@@ -7,7 +7,7 @@ import { useApp } from "@/store/app";
 import { useConfig } from "@/store/config";
 import { Icon } from "../ui/Icon";
 import { Confirm, Menu, Popover, usePopover } from "../ui/Popover";
-import { Field, IBtn } from "../ui/primitives";
+import { Field, IBtn, StageTag } from "../ui/primitives";
 import { SessionEditor } from "./SessionEditor";
 
 type Ctx =
@@ -18,7 +18,7 @@ type Ctx =
 
 export function SessionsPanel() {
   const cfg = useConfig();
-  const { editing, setEditing, openSession, connBySession, disconnectConn, toast, newTab, tabs, activeTab } = useApp();
+  const { editing, setEditing, openSession, connBySession, disconnectConn, newTab, tabs, activeTab, importSshConfig } = useApp();
   const [q, setQ] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const pop = usePopover<Ctx>();
@@ -27,7 +27,8 @@ export function SessionsPanel() {
   const needle = q.trim().toLowerCase();
   const match = (s: Session) => `${s.name} ${s.host} ${s.user}`.toLowerCase().includes(needle);
   const visible = useMemo(
-    () => (needle ? cfg.sessions.filter(match) : cfg.sessions),
+    // Session tạm từ kết nối nhanh chỉ hiện sau khi người dùng bấm Lưu.
+    () => cfg.sessions.filter((s) => !s.quick && (!needle || match(s))),
     [cfg.sessions, needle],
   );
 
@@ -46,26 +47,6 @@ export function SessionsPanel() {
     } else {
       void openSession(s.id);
     }
-  };
-
-  const importSsh = async () => {
-    const hosts = await ipc.sshConfigImport().catch(() => []);
-    if (!hosts.length) return toast("warn", "Không tìm thấy mục nào trong ~/.ssh/config");
-    const byName = new Map(cfg.sessions.map((s) => [s.name, s]));
-    let added = 0;
-    const folderId = cfg.folders.find((f) => f.name === "Nhập từ ~/.ssh/config")?.id
-      ?? cfg.addFolder("Nhập từ ~/.ssh/config");
-    for (const h of hosts) {
-      if (byName.has(h.name)) continue;
-      cfg.upsertSession(
-        newSession({
-          name: h.name, host: h.host || h.name, port: h.port || 22,
-          user: h.user, keyPath: h.identityFile, folderId,
-        }),
-      );
-      added++;
-    }
-    toast(added ? "ok" : "info", added ? `Đã nhập ${added} session` : "Tất cả đã có sẵn");
   };
 
   const commitRename = (f: Folder, value: string) => {
@@ -95,6 +76,7 @@ export function SessionsPanel() {
             <span className="twist" />
             <span className="ico"><Icon n={KIND_ICON[s.kind]} s={14} /></span>
             <span className="label">{s.name || s.host || "(không tên)"}</span>
+            <StageTag stage={s.stage} />
             {live && <span className="led ok" />}
             <span className="act">
               <IBtn icon="edit" tip="Sửa" size="sm" onClick={(e) => { e.stopPropagation(); setEditing(s.id); }} />
@@ -180,7 +162,7 @@ export function SessionsPanel() {
     <>
       <div className="side-head">
         <span className="side-title">Sessions</span>
-        <IBtn icon="download" tip="Nhập từ ~/.ssh/config" size="sm" onClick={() => void importSsh()} />
+        <IBtn icon="download" tip="Nhập từ ~/.ssh/config" size="sm" onClick={() => void importSshConfig()} />
         <IBtn icon="folderPlus" tip="Thư mục mới" size="sm"
           onClick={() => setRenaming(cfg.addFolder("Thư mục mới"))} />
         <IBtn icon="plus" tip="Session mới" size="sm" onClick={() => setEditing("new")} />

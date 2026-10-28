@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import * as ipc from "@/lib/ipc";
-import type { AuthMethod, LocalKey, SerialPortInfo, Session, SessionKind } from "@/lib/types";
+import { STAGE_META, parseAddress, withKey } from "@/lib/kinds";
+import type { AuthMethod, LocalKey, SerialPortInfo, Session, SessionKind, Stage } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { useConfig } from "@/store/config";
 import { Icon } from "../ui/Icon";
-import { Btn, Chip, Field, Group, IBtn, NumField, Row, Select, Switch } from "../ui/primitives";
+import { Btn, Chip, Field, Group, IBtn, NumField, Row, Seg, Select, Switch } from "../ui/primitives";
 
 const KINDS: { value: SessionKind; label: string; icon: string }[] = [
   { value: "ssh", label: "SSH", icon: "server" },
@@ -18,12 +19,14 @@ const KINDS: { value: SessionKind; label: string; icon: string }[] = [
 
 const BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
-const AUTHS: { value: AuthMethod; label: string; tip: string }[] = [
-  { value: "agent", label: "agent", tip: "ssh-agent đang chạy trên máy" },
-  { value: "key", label: "File PEM / khóa riêng", tip: "khóa riêng chỉ định bên dưới" },
-  { value: "password", label: "mật khẩu", tip: "mật khẩu (hỏi khi kết nối nếu không lưu)" },
-  { value: "interactive", label: "tương tác", tip: "keyboard-interactive, ví dụ OTP/2FA" },
+/// Ba lựa chọn dễ hiểu thay cho việc tự xếp thứ tự phương thức.
+const AUTH_MODES: { value: string; label: string; auth: AuthMethod[] }[] = [
+  { value: "auto", label: "Tự động", auth: ["agent", "key", "password", "interactive"] },
+  { value: "password", label: "Mật khẩu", auth: ["password", "interactive"] },
+  { value: "key", label: "Khóa SSH", auth: ["key", "agent"] },
 ];
+const authMode = (auth: AuthMethod[]) =>
+  AUTH_MODES.find((m) => m.auth.join() === auth.join())?.value ?? "auto";
 
 const DEFAULT_PORT: Record<SessionKind, number> = {
   ssh: 22, local: 0, telnet: 23, serial: 0, mosh: 22, rdp: 3389, vnc: 5900,
@@ -31,7 +34,7 @@ const DEFAULT_PORT: Record<SessionKind, number> = {
 
 export function SessionEditor({ session, isNew }: { session: Session; isNew: boolean }) {
   const cfg = useConfig();
-  const { setEditing, openSession, toast, pendingFolder } = useApp();
+  const { setEditing, openSession, toast, pendingFolder, setSide, tunnels: liveTunnels } = useApp();
   const [s, setS] = useState<Session>(() =>
     isNew ? { ...session, folderId: pendingFolder ?? session.folderId } : session,
   );
@@ -70,7 +73,6 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
   const isMosh = s.kind === "mosh";
 
   const save = async (): Promise<Session | null> => {
-    const name = s.name.trim() || (s.kind === "local" ? "Shell" : s.host.trim());
     if (isNet && !s.host.trim()) {
       toast("err", "Cần nhập host");
       return null;
@@ -81,10 +83,15 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
     }
     // Không đọc được keychain thì giữ nguyên bí mật cũ, đừng xoá nhầm.
     const keepStored = secretState === "error";
+    // Dán cả `user@host:port` vào ô Host thì tách khi lưu.
+    const addr = s.host.includes("@") || /:\d+$/.test(s.host) ? parseAddress(s.host) : null;
+    const host = addr?.host ?? s.host.trim();
     const out: Session = {
       ...s,
-      name,
-      port: s.port || DEFAULT_PORT[s.kind],
+      host,
+      user: addr?.user || s.user,
+      name: s.name.trim() || (s.kind === "local" ? "Shell" : host),
+      port: addr?.port ?? (s.port || DEFAULT_PORT[s.kind]),
     };
 
     // Ghi bí mật trước: nếu keychain lỗi thì không lưu gì cả, để trạng thái
@@ -109,9 +116,7 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
     return out;
   };
 
-  const selectKey = (path: string) => setS((prev) => ({
-    ...prev, keyPath: path, auth: ["key", ...prev.auth.filter((method) => method !== "key")],
-  }));
+  const selectKey = (path: string) => setS((prev) => withKey(prev, path));
 
   const pickFile = async (kind: "key" | "dir") => {
     try {
@@ -126,13 +131,10 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
     }
   };
 
-  const toggleAuth = (m: AuthMethod) => {
-    const has = s.auth.includes(m);
-    const next = has ? s.auth.filter((x) => x !== m) : [...AUTHS.map((a) => a.value).filter((v) => s.auth.includes(v) || v === m)];
-    set("auth", next.length ? next : ["password"]);
-  };
-
   const jumpCandidates = cfg.sessions.filter((x) => x.id !== s.id && x.kind === "ssh");
+  const jump = jumpCandidates.find((j) => j.id === s.jumpId);
+  const ownTunnels = cfg.tunnels.filter((t) => t.sessionId === s.id);
+
 
   return (
     <>
@@ -175,8 +177,8 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
             </Row>
             {isNet && (
               <>
-                <Row label="Host">
-                  <Field value={s.host} onChange={(v) => set("host", v)} placeholder="host hoặc IP" mono />
+                <Row label="Host" tip="Dán cả user@host:port, khi lưu app tự tách">
+                  <Field value={s.host} onChange={(v) => set("host", v)} placeholder="host, IP hoặc user@host:port" mono />
                   <NumField value={s.port} onChange={(v) => set("port", v)} min={1} max={65535} width={70} />
                 </Row>
                 {(isSsh || isMosh || s.kind === "telnet") && (
@@ -213,38 +215,33 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
                 options={[{ value: "", label: "— gốc —" }, ...cfg.folders.map((f) => ({ value: f.id, label: f.name }))]}
               />
             </Row>
+            <Row label="Môi trường" stack tip="Tô màu viền tab để không gõ nhầm vào máy production">
+              <Seg
+                value={s.stage ?? ""}
+                onChange={(v) => set("stage", (v || undefined) as Stage | undefined)}
+                options={[
+                  ...(Object.keys(STAGE_META) as Stage[]).map((k) => ({ value: k, label: STAGE_META[k].label })),
+                  { value: "", label: "không" },
+                ]}
+              />
+            </Row>
           </Group>
 
           {isSsh && (
             <Group title="Xác thực" icon="key">
-              <Row label="File PEM" stack>
-                <Btn icon="folder" onClick={() => void pickFile("key")}>
-                  {s.keyPath ? "Đổi file PEM / khóa riêng" : "Chọn file PEM / khóa riêng"}
-                </Btn>
-                <span className="hint">Chọn khóa trên máy (.pem hoặc OpenSSH). Khóa được ưu tiên khi kết nối; file gốc vẫn nằm trên máy bạn.</span>
+              <Row label="Đăng nhập" stack>
+                <Seg
+                  value={authMode(s.auth)}
+                  onChange={(v) => set("auth", AUTH_MODES.find((m) => m.value === v)!.auth)}
+                  options={AUTH_MODES.map((m) => ({ value: m.value, label: m.label }))}
+                />
               </Row>
-              <Row label="Thứ tự thử" stack tip="Thử lần lượt từ trên xuống, dừng khi thành công">
-                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                  {AUTHS.map((a) => {
-                    const i = s.auth.indexOf(a.value);
-                    return (
-                      <button
-                        key={a.value}
-                        type="button"
-                        className="chip"
-                        data-tip={a.tip}
-                        style={
-                          i >= 0
-                            ? { background: "var(--accent-bg)", borderColor: "color-mix(in srgb, var(--accent) 42%, transparent)", color: "var(--accent)" }
-                            : undefined
-                        }
-                        onClick={() => toggleAuth(a.value)}
-                      >
-                        {i >= 0 ? `${i + 1}. ` : ""}{a.label}
-                      </button>
-                    );
-                  })}
-                </div>
+              <Row label="">
+                <span className="hint">
+                  {authMode(s.auth) === "auto"
+                    ? "Thử ssh-agent, khóa, rồi mật khẩu. Hỏi khi cần và nhớ trong Keychain."
+                    : authMode(s.auth) === "key" ? "Dùng file khóa riêng (.pem hoặc OpenSSH) bên dưới." : "Hỏi mật khẩu lần đầu, sau đó dùng bản trong Keychain."}
+                </span>
               </Row>
 
               {s.auth.includes("key") && (
@@ -292,25 +289,13 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
                     />
                   </Row>
                   <Row label="">
-                    <span className="hint">
-                      Mật khẩu nằm trong keychain hệ thống (macOS Keychain / Windows
-                      Credential Manager), không nằm trong file cấu hình. Để trống = hỏi khi
-                      kết nối, và lưu luôn nếu bật “Lưu vào Keychain”.
-                    </span>
+                    {password
+                      ? <span className="hint" style={{ color: "var(--ok)" }}>✓ Đã lưu trong Keychain, không nằm trong file cấu hình.</span>
+                      : <span className="hint">Để trống = hỏi khi kết nối rồi lưu vào Keychain.</span>}
                   </Row>
                 </>
               )}
 
-              <Row label="Bastion" tip="Kết nối gián tiếp qua session khác (ProxyJump)">
-                <Select
-                  value={s.jumpId ?? ""}
-                  onChange={(v) => set("jumpId", v || null)}
-                  options={[
-                    { value: "", label: "— trực tiếp —" },
-                    ...jumpCandidates.map((j) => ({ value: j.id, label: j.name || `${j.user}@${j.host}` })),
-                  ]}
-                />
-              </Row>
             </Group>
           )}
 
@@ -321,19 +306,30 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
             >
               {!advanced && (
                 <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  {jump && <Chip tone="accent">qua {jump.name || jump.host}</Chip>}
                   {s.x11 && <Chip tone="accent">X11</Chip>}
                   {s.agentForward && <Chip tone="accent">agent fwd</Chip>}
                   {s.compression && <Chip tone="accent">nén</Chip>}
                   {s.strictHostKey && <Chip tone="warn">strict host key</Chip>}
                   {s.logToFile && <Chip>ghi log</Chip>}
                   {s.initCommands.length > 0 && <Chip>{s.initCommands.length} lệnh đầu</Chip>}
-                  {!s.x11 && !s.agentForward && !s.compression && !s.strictHostKey && !s.logToFile && !s.initCommands.length && (
+                  {!jump && !s.x11 && !s.agentForward && !s.compression && !s.strictHostKey && !s.logToFile && !s.initCommands.length && (
                     <span className="hint">Đang dùng mặc định</span>
                   )}
                 </div>
               )}
               {advanced && (
                 <>
+              <Row label="Bastion" tip="Kết nối gián tiếp qua session khác (ProxyJump)">
+                <Select
+                  value={s.jumpId ?? ""}
+                  onChange={(v) => set("jumpId", v || null)}
+                  options={[
+                    { value: "", label: "— trực tiếp —" },
+                    ...jumpCandidates.map((j) => ({ value: j.id, label: j.name || `${j.user}@${j.host}` })),
+                  ]}
+                />
+              </Row>
                   <Row label="">
                     <Switch checked={s.x11} onChange={(v) => set("x11", v)} label="X11 forwarding"
                       tip="Cần X server cục bộ đang chạy (XQuartz trên macOS, VcXsrv trên Windows)" />
@@ -383,24 +379,23 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
             </Group>
           )}
 
-          <Group title="Ghi chú & màu" icon="tag">
-            <Row label="Màu tab">
-              <div style={{ display: "flex", gap: 5 }}>
-                {["", "#58a6ff", "#3fb950", "#e3b341", "#ff7b72", "#d2a8ff"].map((c) => (
-                  <button
-                    key={c || "none"}
-                    type="button"
-                    data-tip={c || "không màu"}
-                    onClick={() => set("color", c || undefined)}
-                    style={{
-                      width: 20, height: 20, borderRadius: 5, cursor: "default",
-                      background: c || "transparent",
-                      border: `1px solid ${s.color === c || (!s.color && !c) ? "var(--text)" : "var(--border-strong)"}`,
-                    }}
-                  />
-                ))}
-              </div>
-            </Row>
+          {isSsh && !isNew && (
+            <Group
+              title="Tunnel" icon="plug"
+              actions={<IBtn icon="plus" tip="Thêm tunnel" size="sm" onClick={() => setSide("tunnels")} />}
+            >
+              {ownTunnels.length === 0 && <span className="hint">Chưa có tunnel nào qua session này.</span>}
+              {ownTunnels.map((t) => (
+                <button key={t.id} type="button" className="home-row" onClick={() => setSide("tunnels")}>
+                  <span className="led" style={liveTunnels[t.id]?.state === "running" ? { background: "var(--ok)" } : undefined} />
+                  <span className="main t1">{t.name}</span>
+                  <span className="hint mono">{t.bindPort} → {t.kind === "dynamic" ? "SOCKS5" : t.destPort}</span>
+                </button>
+              ))}
+            </Group>
+          )}
+
+          <Group title="Ghi chú" icon="tag">
             <Row label="Ghi chú" stack>
               <Field value={s.note ?? ""} onChange={(v) => set("note", v)} placeholder="tuỳ chọn" />
             </Row>

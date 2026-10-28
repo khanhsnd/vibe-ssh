@@ -37,15 +37,9 @@ export function TitleBar() {
       <span className="app-title">VIBE SSH</span>
       <div className="drag-zone" data-tauri-drag-region />
 
-      <button
-        type="button"
-        className="btn ghost sm"
-        data-tip={`Bảng lệnh (${modKey()}K)`}
-        onClick={() => setPalette(true)}
-        style={{ gap: 8 }}
-      >
-        <Icon n="search" s={13} />
-        <span style={{ color: "var(--text-3)" }}>Tìm hoặc chạy lệnh</span>
+      <button type="button" className="quickbar" onClick={() => setPalette(true)}>
+        <Icon n="search" s={14} />
+        <span>user@host:port để kết nối, hoặc tìm session / lệnh</span>
         <kbd>{modKey()}K</kbd>
       </button>
 

@@ -37,7 +37,7 @@ function merge(raw: unknown): AppConfig {
     version: d.version ?? 1,
     settings: { ...DEFAULT_SETTINGS, ...(d.settings ?? {}) },
     folders: d.folders ?? [],
-    sessions: (d.sessions ?? []).map((s) => ({ ...s })),
+    sessions: (d.sessions ?? []).filter((s) => !s.quick),
     macros: d.macros ?? [],
     tunnels: d.tunnels ?? [],
   };

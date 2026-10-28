@@ -1,4 +1,6 @@
 import type { ReactNode, CSSProperties } from "react";
+import { STAGE_META } from "@/lib/kinds";
+import type { Stage } from "@/lib/types";
 import { Icon, type IconName } from "./Icon";
 
 // Tooltip dùng CSS `[data-tip]::after`; toạ độ do useTooltips() gắn ở App.
@@ -258,4 +260,11 @@ export function Chip({
   style?: CSSProperties;
 }) {
   return <span className={`chip ${tone ?? ""}`} style={style}>{children}</span>;
+}
+
+/// Tag môi trường của session (prod / staging / dev), cùng màu với viền tab.
+export function StageTag({ stage }: { stage?: Stage }) {
+  if (!stage) return null;
+  const m = STAGE_META[stage];
+  return <Chip style={{ color: m.color, background: m.bg, borderColor: "transparent" }}>{m.label}</Chip>;
 }

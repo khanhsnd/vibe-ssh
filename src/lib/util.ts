@@ -40,3 +40,14 @@ export function parentPath(p: string): string {
 
 export const isMac = () => navigator.platform.toLowerCase().includes("mac");
 export const modKey = () => (isMac() ? "⌘" : "Ctrl");
+
+/// "vừa xong", "5 phút trước", "3 ngày trước" — cho danh sách gần đây.
+export function ago(ms?: number): string {
+  if (!ms) return "chưa mở";
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return "vừa xong";
+  if (m < 60) return `${m} phút trước`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} giờ trước`;
+  return `${Math.round(h / 24)} ngày trước`;
+}

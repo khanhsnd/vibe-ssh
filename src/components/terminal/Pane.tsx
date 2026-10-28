@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useApp, type Pane as PaneT, type Tab } from "@/store/app";
-import { KIND_ICON, kindSubtitle } from "@/lib/kinds";
 import { useConfig } from "@/store/config";
 import { Icon } from "../ui/Icon";
 import { Btn, Field, IBtn } from "../ui/primitives";
 import { AskBar } from "./AskBar";
+import { Home } from "./Home";
 import { TerminalView } from "./TerminalView";
 
 export function Pane({ tab, pane }: { tab: Tab; pane: PaneT }) {
@@ -17,6 +17,7 @@ export function Pane({ tab, pane }: { tab: Tab; pane: PaneT }) {
   const broadcast = useApp((s) => s.broadcast);
   const broadcastTargets = useApp((s) => s.broadcastTargets);
   const conn = useApp((s) => (pane.connId ? s.conns[pane.connId] : undefined));
+  const quick = useConfig((s) => s.sessions.find((x) => x.id === pane.sessionId && x.quick));
 
   // Mọi câu hỏi từ backend đều mang connId, nên lọc chặt: pane trống hoặc
   // pane của kết nối khác không được hiện dải xác nhận của người ta.
@@ -59,7 +60,9 @@ export function Pane({ tab, pane }: { tab: Tab; pane: PaneT }) {
 
       {paneAsks.map((a) => <AskBar key={a.askId} ask={a} />)}
 
-      {pane.status === "empty" && <Launcher tab={tab} pane={pane} />}
+      {pane.status === "ready" && quick && <QuickSave sessionId={quick.id} host={quick.host} />}
+
+      {pane.status === "empty" && <Home target={{ tabId: tab.id, paneId: pane.id }} />}
 
       {pane.status === "connecting" && (
         <Center>
@@ -107,63 +110,18 @@ function Center({ children }: { children: React.ReactNode }) {
   );
 }
 
-/// Pane trống = bảng khởi động gọn, thay cho hộp thoại "new session".
-function Launcher({ tab, pane }: { tab: Tab; pane: PaneT }) {
-  const [q, setQ] = useState("");
-  const sessions = useConfig((s) => s.sessions);
-  const { openSession, openLocal, setEditing, setSide } = useApp();
-
-  const hits = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const list = needle
-      ? sessions.filter((s) =>
-          `${s.name} ${s.host} ${s.user}`.toLowerCase().includes(needle),
-        )
-      : sessions;
-    return list.slice(0, 9);
-  }, [q, sessions]);
-
-  const target = { tabId: tab.id, paneId: pane.id };
-
+/// Sau kết nối nhanh: hỏi inline có lưu thành session không.
+function QuickSave({ sessionId, host }: { sessionId: string; host: string }) {
+  const { saveQuick, discardQuick } = useApp();
+  const [name, setName] = useState(host);
   return (
-    <div style={{ flex: 1, overflow: "auto", padding: "26px 22px", display: "grid", placeItems: "start center" }}>
-      <div style={{ width: "min(440px, 100%)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <span style={{ color: "var(--accent)", display: "grid" }}><Icon n="terminal" s={18} /></span>
-          <b style={{ fontSize: "var(--fs-lg)" }}>Mở phiên mới</b>
-        </div>
-
-        <Field icon="search" value={q} onChange={setQ} placeholder="Tìm session đã lưu…" autoFocus />
-
-        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-          <Btn icon="terminal" small onClick={() => void openLocal(target)}>Shell máy này</Btn>
-          <Btn icon="plus" small onClick={() => { setSide("sessions"); setEditing("new"); }}>Session mới</Btn>
-        </div>
-
-        <div className="list" style={{ marginTop: 14, border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden" }}>
-          {hits.length === 0 && (
-            <div className="hint" style={{ padding: "14px 12px" }}>
-              {sessions.length === 0 ? "Chưa có session nào được lưu." : "Không có kết quả."}
-            </div>
-          )}
-          {hits.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className="list-item"
-              style={{ background: "transparent", border: 0, borderBottom: "1px solid var(--border)", textAlign: "left", width: "100%" }}
-              onClick={() => void openSession(s.id, target)}
-            >
-              <Icon n={KIND_ICON[s.kind]} s={15} />
-              <div className="main">
-                <div className="t1">{s.name || s.host || "(không tên)"}</div>
-                <div className="t2">{kindSubtitle(s)}</div>
-              </div>
-              <Icon n="chevronRight" s={14} />
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="quick-save">
+      <Icon n="check" s={15} />
+      <span>Đã kết nối <b className="mono">{host}</b>. Lưu thành session?</span>
+      <Field value={name} onChange={setName} placeholder="Tên session" />
+      <Btn small variant="primary" onClick={() => saveQuick(sessionId, name)}>Lưu</Btn>
+      <div style={{ flex: 1 }} />
+      <IBtn icon="x" tip="Không lưu" size="sm" onClick={() => discardQuick(sessionId)} />
     </div>
   );
 }

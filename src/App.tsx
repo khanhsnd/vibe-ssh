@@ -44,11 +44,10 @@ export default function App() {
       <div className="app-body">
         <Rail />
 
-        {app.side && (
+        {app.side && app.side !== "tunnels" && (
           <>
             <div className="side" style={{ width: cfg.settings.sidebarWidth }}>
               {app.side === "sessions" && <SessionsPanel />}
-              {app.side === "tunnels" && <TunnelsPanel />}
               {app.side === "macros" && <MacrosPanel />}
               {app.side === "keys" && <KeysPanel />}
               {app.side === "settings" && <SettingsPanel />}
@@ -62,7 +61,11 @@ export default function App() {
           </>
         )}
 
-        <Workspace />
+        <div className="work-wrap">
+          <Workspace />
+          {/* Phủ lên terminal thay vì thay thế: các phiên phía sau vẫn sống. */}
+          {app.side === "tunnels" && <TunnelsPanel />}
+        </div>
 
         {sftpConn && (
           <>

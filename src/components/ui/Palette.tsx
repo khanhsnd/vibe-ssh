@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { KIND_ICON, KIND_LABEL, kindSubtitle } from "@/lib/kinds";
+import { KIND_ICON, KIND_LABEL, kindSubtitle, parseAddress } from "@/lib/kinds";
 import { modKey } from "@/lib/util";
 import { useApp } from "@/store/app";
 import { useConfig } from "@/store/config";
@@ -94,6 +94,10 @@ export function Palette() {
   const hits = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return cmds.slice(0, 40);
+    // Gõ một địa chỉ thì việc đầu tiên là kết nối tới nó.
+    const quick: Cmd[] = parseAddress(q)
+      ? [{ id: "a:quick", label: `Kết nối tới ${q.trim()}`, group: "SSH", icon: "terminal", hint: "Enter", run: () => void app.quickConnect(q) }]
+      : [];
     // Khớp rời rạc theo thứ tự ký tự, ưu tiên khớp liền.
     const score = (text: string) => {
       const t = text.toLowerCase();
@@ -105,13 +109,13 @@ export function Palette() {
       }
       return 100;
     };
-    return cmds
+    return quick.concat(cmds
       .map((c) => ({ c, s: Math.max(score(c.label), score(c.hint ?? "") - 20) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s)
       .slice(0, 40)
-      .map((x) => x.c);
-  }, [cmds, q]);
+      .map((x) => x.c));
+  }, [cmds, q, app]);
 
   useEffect(() => setI(0), [q]);
   useEffect(() => {
@@ -132,7 +136,7 @@ export function Palette() {
           <input
             autoFocus
             value={q}
-            placeholder="Kết nối, chạy macro, đổi bố cục…"
+            placeholder="user@host:port để kết nối, hoặc tìm session / lệnh"
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") { e.preventDefault(); setI((v) => Math.min(v + 1, hits.length - 1)); }

@@ -189,6 +189,12 @@ pub async fn term_close(state: St<'_>, term_id: String) -> Result<()> {
     Ok(())
 }
 
+/// Chạy lệnh ngắn trên server (không PTY) — để lấy tên container/unit cho gợi ý lệnh.
+#[tauri::command]
+pub async fn ssh_exec(state: St<'_>, conn_id: String, cmd: String) -> Result<String> {
+    state.conn(&conn_id).await?.exec(&cmd).await
+}
+
 // ── SFTP ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]

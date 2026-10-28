@@ -94,6 +94,7 @@ export interface Settings {
   bell: boolean;
   copyOnSelect: boolean;
   rightClickPaste: boolean;
+  suggest: boolean;
   webgl: boolean;
   sidebarWidth: number;
   sftpWidth: number;
@@ -121,6 +122,7 @@ export const DEFAULT_SETTINGS: Settings = {
   bell: false,
   copyOnSelect: true,
   rightClickPaste: true,
+  suggest: true,
   webgl: true,
   sidebarWidth: 300,
   sftpWidth: 380,

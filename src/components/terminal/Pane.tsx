@@ -73,7 +73,7 @@ export function Pane({ tab, pane }: { tab: Tab; pane: PaneT }) {
       )}
 
       {(pane.status === "ready" || pane.status === "closed") && pane.termId && (
-        <TerminalView termId={pane.termId} focused={focused} />
+        <TerminalView termId={pane.termId} focused={focused} histKey={pane.sessionId ?? "local"} connId={pane.connId} />
       )}
 
       {pane.status === "error" && (

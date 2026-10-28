@@ -162,6 +162,9 @@ fn connects_with_key_and_runs_a_command() {
         let seen = read_term_until(&mut rx, "SSH_SHELL_OK", Duration::from_secs(20)).await;
         assert!(seen.contains("SSH_SHELL_OK"), "output shell qua SSH: {seen:?}");
 
+        let out = conn.exec("echo EXEC_OK; echo nope >&2").await.expect("exec");
+        assert_eq!(out.trim(), "EXEC_OK");
+
         conn::disconnect(&state, &conn.info.id).await.unwrap();
     });
 }

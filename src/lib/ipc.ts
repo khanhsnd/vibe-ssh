@@ -29,6 +29,8 @@ export interface ConnectOpts {
 }
 export const sshConnect = (opts: ConnectOpts) => invoke<ConnInfo>("ssh_connect", { opts });
 export const sshDisconnect = (id: string) => invoke<void>("ssh_disconnect", { id });
+/** Chạy lệnh ngắn không PTY, trả stdout. */
+export const sshExec = (connId: string, cmd: string) => invoke<string>("ssh_exec", { connId, cmd });
 
 // ── Terminal ──────────────────────────────────────────────────────────────
 export interface ShellOpts {

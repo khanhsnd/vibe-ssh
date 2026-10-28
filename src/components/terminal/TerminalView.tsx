@@ -8,13 +8,27 @@ import { Terminal } from "@xterm/xterm";
 import { listen } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 import * as ipc from "@/lib/ipc";
-import { b64ToBytes, themeFromCss } from "@/lib/term";
+import { suggest } from "@/lib/suggest";
+import { b64ToBytes, cursorAt, inputSince, themeFromCss, type Anchor } from "@/lib/term";
+import { historyOf, loadServerHistory, remember, remoteWords } from "@/store/hints";
 import { useApp } from "@/store/app";
 import { useConfig } from "@/store/config";
 import { IBtn, Field } from "../ui/primitives";
 
-function TerminalViewInner({ termId, focused }: { termId: string; focused: boolean }) {
+interface Props {
+  termId: string;
+  focused: boolean;
+  /** Khóa lịch sử lệnh (id session, hoặc "local"). */
+  histKey: string;
+  /** Kết nối SSH để lấy lịch sử/tên container từ server; null với shell cục bộ. */
+  connId: string | null;
+}
+
+function TerminalViewInner({ termId, focused, histKey, connId }: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const ghostEl = useRef<HTMLDivElement>(null);
+  const ctx = useRef({ histKey, connId });
+  ctx.current = { histKey, connId };
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
   const search = useRef<SearchAddon | null>(null);
@@ -69,7 +83,60 @@ function TerminalViewInner({ termId, focused }: { termId: string; focused: boole
         void ipc.termWrite(termId, data);
       }
     };
-    const dataSub = t.onData(send);
+    // ── Gợi ý lệnh: chữ mờ sau con trỏ, → để nhận ───────────────────────
+    // `anchor` là chỗ con trỏ đứng lúc bắt đầu gõ dòng lệnh (ngay sau prompt).
+    let anchor: Anchor | null = null;
+    let ghost = "";
+    const hide = () => {
+      ghost = "";
+      if (ghostEl.current) ghostEl.current.textContent = "";
+    };
+    const refresh = () => {
+      const b = t.buffer.active;
+      const inp = anchor && inputSince(t, anchor);
+      if (!useConfig.getState().settings.suggest || !inp || inp.after.trim()
+        || b.type === "alternate" || b.viewportY !== b.baseY) return hide();
+      const { histKey: key, connId: conn } = ctx.current;
+      ghost = suggest(inp.before, historyOf(key, conn), (src) => remoteWords(conn, src, refresh));
+      const el = ghostEl.current;
+      const screen = t.element?.querySelector<HTMLElement>(".xterm-screen");
+      if (!ghost || !el || !screen) return hide();
+      const cellW = screen.clientWidth / t.cols;
+      const cellH = screen.clientHeight / t.rows;
+      const off = screen.getBoundingClientRect();
+      const box = el.parentElement!.getBoundingClientRect();
+      el.style.left = `${off.left - box.left + b.cursorX * cellW}px`;
+      el.style.top = `${off.top - box.top + b.cursorY * cellH}px`;
+      el.style.lineHeight = `${cellH}px`;
+      el.textContent = ghost.slice(0, t.cols - b.cursorX);
+    };
+    const onInput = (data: string) => {
+      if (t.buffer.active.type === "alternate") {
+        anchor = null;
+      } else if (data === "\r") {
+        const inp = anchor && inputSince(t, anchor);
+        // Dòng bắt đầu bằng dấu cách = không lưu lịch sử, như HISTCONTROL=ignorespace.
+        if (inp && !inp.before.startsWith(" ")) remember(ctx.current.histKey, inp.before + inp.after);
+        anchor = null;
+      } else if (data === "\x03" || data === "\x0c") {
+        anchor = null;
+      } else if (!anchor) {
+        anchor = cursorAt(t);
+      }
+      if (!anchor) hide();
+      send(data);
+    };
+    t.attachCustomKeyEventHandler((e) => {
+      const plain = !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey;
+      if (!ghost || e.type !== "keydown" || e.key !== "ArrowRight" || !plain) return true;
+      send(ghost);
+      hide();
+      return false;
+    });
+    const parsedSub = t.onWriteParsed(refresh);
+    const scrollSub = t.onScroll(refresh);
+
+    const dataSub = t.onData(onInput);
     const binSub = t.onBinary((raw) => {
       // raw là chuỗi latin-1: mỗi ký tự một byte.
       let bin = "";
@@ -138,6 +205,8 @@ function TerminalViewInner({ termId, focused }: { termId: string; focused: boole
       window.clearTimeout(t0);
       window.clearTimeout(t1);
       dataSub.dispose();
+      parsedSub.dispose();
+      scrollSub.dispose();
       binSub.dispose();
       oscSub.dispose();
       resizeSub.dispose();
@@ -177,6 +246,10 @@ function TerminalViewInner({ termId, focused }: { termId: string; focused: boole
   useEffect(() => {
     if (focused) term.current?.focus();
   }, [focused]);
+
+  useEffect(() => {
+    if (connId) loadServerHistory(connId);
+  }, [connId]);
 
   // ⌘F / Ctrl+F mở thanh tìm kiếm ngay trong pane.
   useEffect(() => {
@@ -218,7 +291,14 @@ function TerminalViewInner({ termId, focused }: { termId: string; focused: boole
           <IBtn icon="x" tip="Đóng (Esc)" size="sm" onClick={() => setFinding(false)} />
         </div>
       )}
-      <div className="term-host" ref={host} />
+      <div className="term-wrap">
+        <div className="term-host" ref={host} />
+        <div
+          className="term-ghost"
+          ref={ghostEl}
+          style={{ fontFamily: settings.fontFamily, fontSize: settings.fontSize }}
+        />
+      </div>
     </div>
   );
 }

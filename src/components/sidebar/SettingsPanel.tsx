@@ -74,6 +74,10 @@ export function SettingsPanel() {
                 label="Chuột phải để dán" />
             </Row>
             <Row label="">
+              <Switch checked={settings.suggest} onChange={(v) => patchSettings({ suggest: v })}
+                label="Gợi ý lệnh khi gõ (→ để nhận)" />
+            </Row>
+            <Row label="">
               <Switch checked={settings.webgl} onChange={(v) => patchSettings({ webgl: v })}
                 label="Tăng tốc WebGL"
                 tip="Vẽ nhanh hơn, tốn thêm vài MB VRAM. Tắt nếu thấy hiển thị lạ. Áp dụng cho pane mở sau." />

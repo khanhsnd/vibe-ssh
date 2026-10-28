@@ -41,6 +41,7 @@ pub fn run() {
             commands::answer,
             commands::ssh_connect,
             commands::ssh_disconnect,
+            commands::ssh_exec,
             commands::shell_open,
             commands::telnet_open,
             commands::serial_ports,

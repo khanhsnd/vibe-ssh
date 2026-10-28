@@ -1,4 +1,4 @@
-import type { ITheme } from "@xterm/xterm";
+import type { ITheme, Terminal } from "@xterm/xterm";
 
 /// Đọc palette terminal từ CSS variable để terminal luôn khớp theme app.
 export function themeFromCss(): ITheme {
@@ -63,4 +63,28 @@ export function b64ToBytes(b64: string): Uint8Array {
     out[o++] = ((b << 4) | (c >> 2)) & 255;
   }
   return o === out.length ? out : out.subarray(0, o);
+}
+
+/** Vị trí trong buffer (y tuyệt đối, tính cả scrollback). */
+export interface Anchor { x: number; y: number }
+
+export function cursorAt(t: Terminal): Anchor {
+  const b = t.buffer.active;
+  return { x: b.cursorX, y: b.baseY + b.cursorY };
+}
+
+/// Chữ trên màn hình từ `a` tới con trỏ (`before`) và phần còn lại của dòng (`after`).
+/// Đọc từ màn hình nên vẫn đúng sau Tab, ↑ lịch sử hay sửa giữa dòng.
+export function inputSince(t: Terminal, a: Anchor): { before: string; after: string } | null {
+  const b = t.buffer.active;
+  const y = b.baseY + b.cursorY;
+  if (y < a.y || (y === a.y && b.cursorX < a.x)) return null;
+  let before = "";
+  for (let r = a.y; r <= y; r++) {
+    const line = b.getLine(r);
+    if (!line) return null;
+    before += line.translateToString(false, r === a.y ? a.x : 0, r === y ? b.cursorX : undefined);
+  }
+  const after = b.getLine(y)?.translateToString(true, b.cursorX) ?? "";
+  return { before, after };
 }

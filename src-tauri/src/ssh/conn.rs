@@ -99,6 +99,21 @@ impl SshConn {
         *slot = Some(s.clone());
         Ok(s)
     }
+
+    /// Chạy một lệnh không cần PTY, trả về stdout (bỏ stderr). Dùng cho gợi ý lệnh.
+    pub async fn exec(&self, cmd: &str) -> Result<String> {
+        let mut ch = self.handle.lock().await.channel_open_session().await?;
+        ch.exec(true, cmd).await?;
+        let mut out = Vec::new();
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                russh::ChannelMsg::Data { data } => out.extend_from_slice(&data),
+                russh::ChannelMsg::Eof | russh::ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        Ok(String::from_utf8_lossy(&out).into_owned())
+    }
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────

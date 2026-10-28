@@ -81,12 +81,10 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
     }
     // Không đọc được keychain thì giữ nguyên bí mật cũ, đừng xoá nhầm.
     const keepStored = secretState === "error";
-    const hasPassword = password.trim().length > 0;
     const out: Session = {
       ...s,
       name,
       port: s.port || DEFAULT_PORT[s.kind],
-      savePassword: hasPassword || (keepStored && s.savePassword),
     };
 
     // Ghi bí mật trước: nếu keychain lỗi thì không lưu gì cả, để trạng thái
@@ -295,9 +293,9 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
                   </Row>
                   <Row label="">
                     <span className="hint">
-                      Nhập mật khẩu = lưu vào keychain hệ thống (macOS Keychain / Windows
-                      Credential Manager), không nằm trong file cấu hình. Để trống = hỏi mỗi
-                      lần kết nối.
+                      Mật khẩu nằm trong keychain hệ thống (macOS Keychain / Windows
+                      Credential Manager), không nằm trong file cấu hình. Để trống = hỏi khi
+                      kết nối, và lưu luôn nếu bật “Lưu vào Keychain”.
                     </span>
                   </Row>
                 </>

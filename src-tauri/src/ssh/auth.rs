@@ -8,6 +8,7 @@ use russh::keys::agent::client::{AgentClient, AgentStream};
 use russh::keys::PrivateKeyWithHashAlg;
 use serde_json::json;
 use std::sync::Arc;
+use crate::secrets;
 use crate::ui::Ui;
 
 /// russh dựng future của `Signer` (ssh-agent) mà không đảm bảo `Send`, nên cả
@@ -114,6 +115,61 @@ async fn try_agent(h: &mut Handle<Client>, user: &str) -> Result<bool> {
     Ok(false)
 }
 
+/// Bản đã lưu + số lần hỏi lại khi sai, giống `NumberOfPasswordPrompts` của OpenSSH.
+const PROMPTS: usize = 3;
+
+/// Một mật khẩu hoặc passphrase gắn với một mục keychain: lần đầu dùng bản đã
+/// lưu, sai hoặc chưa có thì hỏi người dùng qua dải inline.
+struct Secret<'a> {
+    ui: &'a Ui,
+    conn_id: &'a str,
+    key: Option<String>,
+    /// `kind`, `title`, `detail`, `user` cho dải hỏi.
+    prompt: serde_json::Value,
+    /// Chỉ đọc keychain khi thật sự cần, tránh hộp thoại Keychain thừa.
+    store_read: bool,
+    /// Đã đưa ra ít nhất một giá trị → lần hỏi kế tiếp nghĩa là giá trị trước sai.
+    tried: bool,
+}
+
+impl<'a> Secret<'a> {
+    fn new(ui: &'a Ui, conn_id: &'a str, key: Option<String>, prompt: serde_json::Value) -> Self {
+        Self { ui, conn_id, key, prompt, store_read: false, tried: false }
+    }
+
+    /// Giá trị kế tiếp để thử và có cần lưu lại nếu đúng. `None` = người dùng bỏ qua.
+    async fn next(&mut self) -> Option<(String, bool)> {
+        if !self.store_read {
+            self.store_read = true;
+            if let Some(v) = self.key.as_deref().and_then(secrets::get) {
+                self.tried = true;
+                return Some((v, false));
+            }
+        }
+        let mut payload = self.prompt.clone();
+        payload["connId"] = json!(self.conn_id);
+        payload["retry"] = json!(self.tried);
+        payload["canSave"] = json!(self.key.is_some());
+        self.tried = true;
+
+        let ans = self.ui.ask("auth:secret", payload, 180).await?;
+        let value = ans.get("value")?.as_str()?.to_string();
+        let remember = ans.get("remember").and_then(|b| b.as_bool()).unwrap_or(false);
+        (!value.is_empty()).then_some((value, remember))
+    }
+
+    /// Gọi khi giá trị đã được server/khóa chấp nhận.
+    fn accepted(&self, value: &str, remember: bool) {
+        let (Some(key), true) = (&self.key, remember) else { return };
+        if let Err(e) = secrets::set(key, value) {
+            self.ui.emit(
+                "conn:warn",
+                json!({ "connId": self.conn_id, "text": format!("Không lưu được vào keychain: {e}") }),
+            );
+        }
+    }
+}
+
 async fn try_key(
     ui: &Ui,
     h: &mut Handle<Client>,
@@ -129,33 +185,29 @@ async fn try_key(
         bail!("Không tìm thấy khóa: {path}");
     }
 
-    let mut pass = hop.key_passphrase.clone().filter(|s| !s.is_empty());
+    let mut secret = Secret::new(
+        ui,
+        conn_id,
+        hop.secret_key("pp"),
+        json!({ "kind": "passphrase", "title": "Passphrase của khóa", "detail": path, "user": user }),
+    );
+    let mut pass: Option<(String, bool)> = None;
+    let mut tries = 0;
     let key = loop {
-        match russh::keys::load_secret_key(&path, pass.as_deref()) {
+        match russh::keys::load_secret_key(&path, pass.as_ref().map(|p| p.0.as_str())) {
             Ok(k) => break k,
-            Err(_) if pass.is_none() => {
-                let ans = ui
-                    .ask(
-                        "auth:secret",
-                        json!({
-                            "connId": conn_id, "kind": "passphrase",
-                            "title": "Passphrase của khóa",
-                            "detail": path, "user": user,
-                        }),
-                        180,
-                    )
-                    .await;
-                let v = ans
-                    .and_then(|v| v.get("value").and_then(|s| s.as_str().map(String::from)))
-                    .unwrap_or_default();
-                if v.is_empty() {
-                    bail!("Cần passphrase để mở khóa {path}");
-                }
-                pass = Some(v);
+            Err(_) if tries <= PROMPTS => {
+                tries += 1;
+                pass = Some(secret.next().await.ok_or_else(|| {
+                    AppError::Msg(format!("Cần passphrase để mở khóa {path}"))
+                })?);
             }
             Err(e) => bail!("Khóa {path} không đọc được: {e}"),
         }
     };
+    if let Some((p, remember)) = &pass {
+        secret.accepted(p, *remember);
+    }
 
     let hash = if key.algorithm().is_rsa() {
         h.best_supported_rsa_hash().await?.flatten()
@@ -178,25 +230,23 @@ async fn try_password(
     user: &str,
     conn_id: &str,
 ) -> Result<bool> {
-    let mut pw = hop.password.clone().filter(|s| !s.is_empty());
-    if pw.is_none() {
-        let ans = ui
-            .ask(
-                "auth:secret",
-                json!({
-                    "connId": conn_id, "kind": "password",
-                    "title": "Mật khẩu SSH",
-                    "detail": format!("{user}@{}", hop.host), "user": user,
-                }),
-                180,
-            )
-            .await;
-        pw = ans
-            .and_then(|v| v.get("value").and_then(|s| s.as_str().map(String::from)))
-            .filter(|s| !s.is_empty());
+    let mut secret = Secret::new(
+        ui,
+        conn_id,
+        hop.secret_key("pw"),
+        json!({
+            "kind": "password", "title": "Mật khẩu SSH",
+            "detail": format!("{user}@{}", hop.host), "user": user,
+        }),
+    );
+    for _ in 0..=PROMPTS {
+        let Some((pw, remember)) = secret.next().await else { return Ok(false) };
+        if h.authenticate_password(user.to_string(), pw.clone()).await?.success() {
+            secret.accepted(&pw, remember);
+            return Ok(true);
+        }
     }
-    let Some(pw) = pw else { return Ok(false) };
-    Ok(h.authenticate_password(user.to_string(), pw).await?.success())
+    Ok(false)
 }
 
 async fn try_interactive(

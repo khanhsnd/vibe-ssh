@@ -28,7 +28,6 @@ export interface Session {
   user: string;
   auth: AuthMethod[];
   keyPath?: string;
-  savePassword: boolean;
   jumpId?: string | null;
 
   x11: boolean;
@@ -139,7 +138,6 @@ export function newSession(patch: Partial<Session> = {}): Session {
     port: 22,
     user: "",
     auth: ["agent", "key", "password", "interactive"],
-    savePassword: false,
     jumpId: null,
     x11: false,
     agentForward: false,

@@ -19,7 +19,8 @@ export const answer = (askId: string, value: unknown) => invoke<void>("answer", 
 // ── Kết nối ───────────────────────────────────────────────────────────────
 export interface Hop {
   label?: string; host: string; port: number; user: string;
-  auth: string[]; password?: string; keyPath?: string; keyPassphrase?: string;
+  /** Id session giữ mật khẩu/passphrase trong keychain; Rust tự đọc và lưu. */
+  auth: string[]; keyPath?: string; secretId: string;
 }
 export interface ConnectOpts {
   id: string; target: Hop; jumps: Hop[];

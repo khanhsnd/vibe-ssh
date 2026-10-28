@@ -73,13 +73,16 @@ function HostKey({ ask, answer }: { ask: Ask; answer: Answer }) {
 }
 
 function Secret({ ask, answer }: { ask: Ask; answer: Answer }) {
-  const p = ask.payload as Record<string, string>;
+  const p = ask.payload as {
+    kind: string; title: string; detail: string; retry?: boolean; canSave?: boolean;
+  };
   const [value, setValue] = useState("");
   const [show, setShow] = useState(false);
+  const [remember, setRemember] = useState(true);
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => ref.current?.focus(), []);
 
-  const submit = () => void answer(ask.askId, { value });
+  const submit = () => void answer(ask.askId, { value, remember: remember && !!p.canSave });
 
   return (
     <div style={{ ...barStyle, borderLeft: "3px solid var(--accent)" }}>
@@ -91,8 +94,11 @@ function Secret({ ask, answer }: { ask: Ask; answer: Answer }) {
         <span className="mono" style={{ color: "var(--text-3)", fontSize: "var(--fs-xs)" }}>
           {p.detail}
         </span>
+        {p.retry && (
+          <span style={{ color: "var(--danger)", fontSize: "var(--fs-xs)" }}>Sai, nhập lại</span>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <div className="field" style={{ flex: 1 }}>
           <input
             ref={ref}
@@ -113,6 +119,12 @@ function Secret({ ask, answer }: { ask: Ask; answer: Answer }) {
             <Icon n={show ? "eyeOff" : "eye"} s={13} />
           </button>
         </div>
+        {p.canSave && (
+          <Switch
+            checked={remember} onChange={setRemember} label="Lưu vào Keychain"
+            tip="Lần sau kết nối không cần nhập lại"
+          />
+        )}
         <Btn small variant="primary" onClick={submit}>Gửi</Btn>
       </div>
     </div>

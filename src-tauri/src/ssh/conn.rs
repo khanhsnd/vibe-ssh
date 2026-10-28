@@ -25,9 +25,16 @@ pub struct Hop {
     pub user: String,
     /// Thứ tự thử: `agent` | `key` | `password` | `interactive` | `none`.
     pub auth: Vec<String>,
-    pub password: Option<String>,
     pub key_path: Option<String>,
-    pub key_passphrase: Option<String>,
+    /// Id session sở hữu mật khẩu/passphrase trong keychain (`pw:{id}`, `pp:{id}`).
+    /// Rỗng = chặng không gắn session, chỉ hỏi chứ không lưu.
+    pub secret_id: String,
+}
+
+impl Hop {
+    pub(crate) fn secret_key(&self, prefix: &str) -> Option<String> {
+        (!self.secret_id.is_empty()).then(|| format!("{prefix}:{}", self.secret_id))
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, Default)]

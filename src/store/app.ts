@@ -138,36 +138,15 @@ function jumpChain(session: Session, all: Session[]): Session[] {
   return chain;
 }
 
-/// `warn` để người dùng biết vì sao vẫn bị hỏi mật khẩu dù đã lưu — im lặng ở
-/// đây là nguyên nhân của lỗi "lưu rồi mà vẫn hỏi".
-async function hopOf(s: Session, warn: (msg: string) => void): Promise<ipc.Hop> {
-  const who = s.name || `${s.user}@${s.host}`;
-  let password: string | null = null;
-  if (s.savePassword) {
-    try {
-      password = await ipc.secretGet(`pw:${s.id}`);
-      if (!password) warn(`Keychain không có mật khẩu đã lưu cho ${who} — hãy nhập lại và lưu.`);
-    } catch (e) {
-      warn(`Không đọc được keychain cho ${who}: ${e}`);
-    }
-  }
-  let keyPassphrase: string | null = null;
-  if (s.keyPath) {
-    // Khóa không đặt passphrase là bình thường → chỉ báo khi thực sự lỗi.
-    keyPassphrase = await ipc.secretGet(`pp:${s.id}`).catch((e) => {
-      warn(`Không đọc được passphrase của ${who}: ${e}`);
-      return null;
-    });
-  }
+function hopOf(s: Session): ipc.Hop {
   return {
     label: s.name || `${s.user}@${s.host}`,
     host: s.host,
     port: s.port || 22,
     user: s.user,
     auth: s.auth,
-    password: password ?? undefined,
     keyPath: s.keyPath || undefined,
-    keyPassphrase: keyPassphrase ?? undefined,
+    secretId: s.id,
   };
 }
 
@@ -386,14 +365,13 @@ export const useApp = create<AppStore>((set, get) => {
       }));
       mapTab(tabId, (t) => ({ ...t, title: s.name || s.host, color: s.color }));
 
-      const warn = (msg: string) => get().toast("warn", msg);
       try {
         if (!alive) {
           const chain = jumpChain(s, cfg.sessions);
           const info = await ipc.sshConnect({
             id: connId,
-            target: await hopOf(s, warn),
-            jumps: await Promise.all(chain.map((h) => hopOf(h, warn))),
+            target: hopOf(s),
+            jumps: chain.map(hopOf),
             keepalive: s.keepalive,
             compression: s.compression,
             x11: s.x11,

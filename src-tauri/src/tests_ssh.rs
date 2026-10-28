@@ -277,6 +277,69 @@ fn rejects_unknown_host_key_in_strict_mode() {
     });
 }
 
+/// Passphrase nhập sai được hỏi lại; nhập đúng thì lưu vào keychain và lần
+/// kết nối sau không hỏi nữa. Đi chung đường với mật khẩu (`auth::Secret`),
+/// nhưng sshd chạy quyền user thường không xác thực mật khẩu được.
+#[test]
+fn remembers_key_passphrase_after_first_prompt() {
+    let _g = serial();
+    let Some(s) = setup() else { return };
+    let locked = s.dir.join("clientkey_locked");
+    std::fs::copy(&s.client_key, &locked).unwrap();
+    let ok = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-p", "-P", "", "-N", "dung", "-f"])
+        .arg(&locked)
+        .status()
+        .unwrap();
+    assert!(ok.success(), "đặt passphrase cho khóa thử");
+
+    let secret_id = format!("test-{}", uuid::Uuid::new_v4());
+    let keychain = format!("pp:{secret_id}");
+
+    rt(async {
+        let state = Arc::new(AppState::default());
+        let (u, mut rx) = ui::channel(state.asks.clone());
+
+        // Ghi lại mọi câu hỏi; trả lời sai trước, đúng sau.
+        let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let (asks, seen2) = (state.asks.clone(), seen.clone());
+        tokio::spawn(async move {
+            while let Some((ev, v)) = rx.recv().await {
+                if ev != "auth:secret" {
+                    continue;
+                }
+                let id = v.get("askId").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let n = { let mut s = seen2.lock().unwrap(); s.push(v); s.len() };
+                let value = if n == 1 { "sai" } else { "dung" };
+                ui::answer(&asks, &id, serde_json::json!({ "value": value, "remember": true })).await;
+            }
+        });
+
+        let connect = |state: Arc<AppState>, u: ui::Ui| {
+            let mut o = opts(&s, &locked, vec![]);
+            o.target.secret_id = secret_id.clone();
+            async move {
+                let c = conn::connect(u, state.clone(), o).await.expect("kết nối bằng khóa có passphrase");
+                conn::disconnect(&state, &c.info.id).await.unwrap();
+            }
+        };
+
+        connect(state.clone(), u.clone()).await;
+        {
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 2, "sai một lần → hỏi đúng hai lần");
+            assert_eq!(seen[0]["retry"], false);
+            assert_eq!(seen[1]["retry"], true, "lần hỏi thứ hai phải báo là nhập sai");
+            assert_eq!(seen[0]["canSave"], true);
+        }
+        assert_eq!(crate::secrets::get(&keychain).as_deref(), Some("dung"), "passphrase đúng phải được lưu");
+
+        connect(state.clone(), u).await;
+        assert_eq!(seen.lock().unwrap().len(), 2, "lần sau dùng bản đã lưu, không hỏi nữa");
+    });
+    crate::secrets::delete(&keychain).unwrap();
+}
+
 // ── SFTP ──────────────────────────────────────────────────────────────────
 
 #[test]

@@ -87,11 +87,13 @@ export const sftpUpload = (connId: string, local: string, remote: string, xferId
   invoke<void>("sftp_upload", { connId, local, remote, xferId });
 
 // ── Tunnel ────────────────────────────────────────────────────────────────
+/** Mỗi tunnel có kết nối SSH riêng (`connect`); trạng thái báo qua sự kiện `tunnel:state`. */
 export interface TunnelSpec {
-  id: string; connId: string; kind: string;
+  id: string; connect: ConnectOpts; kind: string;
   bindHost: string; bindPort: number; destHost: string; destPort: number;
+  autoReconnect: boolean;
 }
-export const tunnelStart = (spec: TunnelSpec) => invoke<number>("tunnel_start", { spec });
+export const tunnelStart = (spec: TunnelSpec) => invoke<void>("tunnel_start", { spec });
 export const tunnelStop = (id: string) => invoke<void>("tunnel_stop", { id });
 
 // ── Host key & nhập liệu ──────────────────────────────────────────────────

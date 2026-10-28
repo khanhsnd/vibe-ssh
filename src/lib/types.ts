@@ -70,7 +70,10 @@ export interface TunnelDef {
   bindPort: number;
   destHost: string;
   destPort: number;
+  /** Chạy ngay khi mở app. */
   autoStart: boolean;
+  /** Rớt kết nối thì tự nối lại thay vì dừng hẳn. */
+  autoReconnect: boolean;
 }
 
 export interface Settings {

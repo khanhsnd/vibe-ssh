@@ -73,11 +73,11 @@ async fn auth_inner(
         }
         tried.push(method.clone());
     }
-    bail!(
+    Err(AppError::Rejected(format!(
         "Xác thực thất bại cho {user}@{} (đã thử: {})",
         hop.host,
         tried.join(", ")
-    )
+    )))
 }
 
 #[cfg(unix)]

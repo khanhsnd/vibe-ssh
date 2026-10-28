@@ -49,11 +49,20 @@ export interface Xfer {
 
 export type SidePanel = "sessions" | "tunnels" | "keys" | "macros" | "settings" | null;
 
-interface LiveTunnel {
-  id: string;
-  port: number;
-  connId: string;
+/** Trạng thái theo sự kiện `tunnel:state` của backend. */
+export interface LiveTunnel {
+  state: "connecting" | "running" | "retrying" | "stopped";
+  port?: number;
+  /** Lý do rớt / dừng. */
+  detail?: string;
+  /** Số giây tới lần nối lại kế tiếp. */
+  retryIn?: number;
 }
+
+/// Tunnel phải phát hiện rớt mạng nhanh để nối lại, bất kể keepalive của session.
+const TUNNEL_KEEPALIVE = 15;
+
+export const tunnelConnId = (tunnelId: string) => `tun-${tunnelId}`;
 
 interface AppStore {
   tabs: Tab[];
@@ -138,6 +147,19 @@ function jumpChain(session: Session, all: Session[]): Session[] {
   return chain;
 }
 
+function connectOpts(id: string, s: Session, all: Session[]): ipc.ConnectOpts {
+  return {
+    id,
+    target: hopOf(s),
+    jumps: jumpChain(s, all).map(hopOf),
+    keepalive: s.keepalive,
+    compression: s.compression,
+    x11: s.x11,
+    agentForward: s.agentForward,
+    strictHostKey: s.strictHostKey,
+  };
+}
+
 function hopOf(s: Session): ipc.Hop {
   return {
     label: s.name || `${s.user}@${s.host}`,
@@ -212,7 +234,9 @@ export const useApp = create<AppStore>((set, get) => {
       } catch (e) {
         // Chạy ngoài Tauri (xem UI trên trình duyệt) → không có kênh sự kiện.
         console.warn("Không nối được kênh sự kiện backend:", e);
+        return;
       }
+      for (const t of useConfig.getState().tunnels) if (t.autoStart) void get().startTunnel(t.id);
     },
 
     toast: (kind, msg) => {
@@ -367,17 +391,7 @@ export const useApp = create<AppStore>((set, get) => {
 
       try {
         if (!alive) {
-          const chain = jumpChain(s, cfg.sessions);
-          const info = await ipc.sshConnect({
-            id: connId,
-            target: hopOf(s),
-            jumps: chain.map(hopOf),
-            keepalive: s.keepalive,
-            compression: s.compression,
-            x11: s.x11,
-            agentForward: s.agentForward,
-            strictHostKey: s.strictHostKey,
-          });
+          const info = await ipc.sshConnect(connectOpts(connId, s, cfg.sessions));
           set({
             conns: { ...get().conns, [connId]: info },
             connBySession: { ...get().connBySession, [sessionId]: connId },
@@ -393,10 +407,6 @@ export const useApp = create<AppStore>((set, get) => {
         // Mở luôn cây thư mục xa như MobaXterm, trừ khi người dùng đã tắt.
         if (!get().sftpDismissed && !cfg.settings.showSftp) {
           useConfig.getState().patchSettings({ showSftp: true });
-        }
-        // Tunnel có autoStart chỉ chạy sau khi kết nối sẵn sàng.
-        for (const t of cfg.tunnels.filter((x) => x.sessionId === sessionId && x.autoStart)) {
-          if (!get().tunnels[t.id]) void get().startTunnel(t.id);
         }
       } catch (e) {
         const msg = String(e);
@@ -492,21 +502,23 @@ export const useApp = create<AppStore>((set, get) => {
     startTunnel: async (tunnelId) => {
       const cfg = useConfig.getState();
       const t = cfg.tunnels.find((x) => x.id === tunnelId);
-      if (!t) return;
-      const connId = get().connBySession[t.sessionId];
-      if (!connId || !get().conns[connId]) {
-        get().toast("warn", "Hãy kết nối session của tunnel này trước");
+      const s = t && cfg.sessions.find((x) => x.id === t.sessionId && x.kind === "ssh");
+      if (!t || !s) {
+        get().toast("err", "Session SSH của tunnel này đã bị xóa");
         return;
       }
+      const setLive = (live: LiveTunnel) => set({ tunnels: { ...get().tunnels, [t.id]: live } });
+      setLive({ state: "connecting" });
       try {
-        const port = await ipc.tunnelStart({
-          id: t.id, connId, kind: t.kind,
+        await ipc.tunnelStart({
+          id: t.id, kind: t.kind,
+          connect: { ...connectOpts(tunnelConnId(t.id), s, cfg.sessions), keepalive: TUNNEL_KEEPALIVE },
           bindHost: t.bindHost, bindPort: t.bindPort,
           destHost: t.destHost, destPort: t.destPort,
+          autoReconnect: t.autoReconnect,
         });
-        set({ tunnels: { ...get().tunnels, [t.id]: { id: t.id, port, connId } } });
-        get().toast("ok", `Tunnel ${t.name || t.kind} đang chạy ở cổng ${port}`);
       } catch (e) {
+        setLive({ state: "stopped", detail: String(e) });
         get().toast("err", String(e));
       }
     },
@@ -606,10 +618,11 @@ async function wire(
     });
   });
 
-  await listen<{ id: string; reason: string }>("tunnel:closed", (e) => {
-    const next = { ...get().tunnels };
-    delete next[e.payload.id];
-    set({ tunnels: next });
+  await listen<LiveTunnel & { id: string }>("tunnel:state", (e) => {
+    const { id, ...live } = e.payload;
+    // Người dùng đã bấm dừng thì bỏ qua sự kiện đến muộn.
+    if (!get().tunnels[id]) return;
+    set({ tunnels: { ...get().tunnels, [id]: live } });
   });
 
   const tick = async () => set({ mem: await ipc.memUsage().catch(() => null) });

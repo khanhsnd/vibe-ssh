@@ -19,8 +19,6 @@ pub struct Term {
 
 pub struct Tunnel {
     pub stop: Option<oneshot::Sender<()>>,
-    /// Dùng để đóng mọi tunnel của một kết nối khi kết nối đó ngắt.
-    pub conn_id: String,
 }
 
 #[derive(Default)]

@@ -295,7 +295,7 @@ pub async fn connect(ui: Ui, state: Arc<AppState>, o: ConnectOpts) -> Result<Arc
         let h = match chain.last() {
             None => client::connect(cfg.clone(), (hop.host.as_str(), hop.port), client_for(&ui, &o, &shared, hop))
                 .await
-                .map_err(|e| AppError::Msg(format!("Không nối được {label}: {e}")))?,
+                .map_err(|e| dial_err(&label, e))?,
             Some(prev) => {
                 let ch = prev
                     .channel_open_direct_tcpip(hop.host.clone(), hop.port as u32, "127.0.0.1", 0)
@@ -303,7 +303,7 @@ pub async fn connect(ui: Ui, state: Arc<AppState>, o: ConnectOpts) -> Result<Arc
                     .map_err(|e| AppError::Msg(format!("Mở đường tới {label} thất bại: {e}")))?;
                 client::connect_stream(cfg.clone(), ch.into_stream(), client_for(&ui, &o, &shared, hop))
                     .await
-                    .map_err(|e| AppError::Msg(format!("Không nối được {label}: {e}")))?
+                    .map_err(|e| dial_err(&label, e))?
             }
         };
         phase(&ui, &o.id, "Đang xác thực bastion", &label);
@@ -319,7 +319,7 @@ pub async fn connect(ui: Ui, state: Arc<AppState>, o: ConnectOpts) -> Result<Arc
     let h = match chain.last() {
         None => client::connect(cfg.clone(), (t.host.as_str(), t.port), client_for(&ui, &o, &shared, t))
             .await
-            .map_err(|e| AppError::Msg(format!("Không nối được {label}: {e}")))?,
+            .map_err(|e| dial_err(&label, e))?,
         Some(prev) => {
             let ch = prev
                 .channel_open_direct_tcpip(t.host.clone(), t.port as u32, "127.0.0.1", 0)
@@ -327,7 +327,7 @@ pub async fn connect(ui: Ui, state: Arc<AppState>, o: ConnectOpts) -> Result<Arc
                 .map_err(|e| AppError::Msg(format!("Mở đường tới {label} thất bại: {e}")))?;
             client::connect_stream(cfg.clone(), ch.into_stream(), client_for(&ui, &o, &shared, t))
                 .await
-                .map_err(|e| AppError::Msg(format!("Không nối được {label}: {e}")))?
+                .map_err(|e| dial_err(&label, e))?
         }
     };
 
@@ -352,6 +352,15 @@ pub async fn connect(ui: Ui, state: Arc<AppState>, o: ConnectOpts) -> Result<Arc
     state.conns.lock().await.insert(o.id.clone(), conn.clone());
     ui.emit("conn:ready", json!({ "conn": conn.info.clone() }));
     Ok(conn)
+}
+
+/// Host key bị từ chối là quyết định của người dùng, không phải lỗi mạng.
+fn dial_err(label: &str, e: russh::Error) -> AppError {
+    let msg = format!("Không nối được {label}: {e}");
+    match e {
+        russh::Error::UnknownKey => AppError::Rejected(msg),
+        _ => AppError::Msg(msg),
+    }
 }
 
 pub(crate) fn phase(ui: &Ui, conn_id: &str, text: &str, hop: &str) {
@@ -406,7 +415,7 @@ mod tests {
     }
 }
 
-/// Đóng kết nối và mọi thứ phụ thuộc vào nó.
+/// Đóng kết nối. Tunnel có kết nối riêng nên không bị ảnh hưởng.
 pub async fn disconnect(state: &Arc<AppState>, id: &str) -> Result<()> {
     if let Some(c) = state.conns.lock().await.remove(id) {
         let _ = c
@@ -415,19 +424,6 @@ pub async fn disconnect(state: &Arc<AppState>, id: &str) -> Result<()> {
             .await
             .disconnect(russh::Disconnect::ByApplication, "bye", "")
             .await;
-    }
-    let mut tunnels = state.tunnels.lock().await;
-    let ids: Vec<String> = tunnels
-        .iter()
-        .filter(|(_, t)| t.conn_id == id)
-        .map(|(k, _)| k.clone())
-        .collect();
-    for tid in ids {
-        if let Some(mut t) = tunnels.remove(&tid) {
-            if let Some(s) = t.stop.take() {
-                let _ = s.send(());
-            }
-        }
     }
     Ok(())
 }

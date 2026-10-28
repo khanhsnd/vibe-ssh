@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { TunnelDef } from "@/lib/types";
-import { useApp } from "@/store/app";
+import { tunnelConnId, useApp, type LiveTunnel } from "@/store/app";
 import { useConfig } from "@/store/config";
+import { AskBar } from "../terminal/AskBar";
 import { Icon } from "../ui/Icon";
 import { Confirm, Popover, usePopover } from "../ui/Popover";
-import { Btn, Chip, Field, IBtn, NumField, Row, Select } from "../ui/primitives";
+import { Btn, Chip, Field, IBtn, NumField, Row, Select, Switch } from "../ui/primitives";
 
 const KIND_LABEL: Record<TunnelDef["kind"], string> = {
   local: "Local (-L)", remote: "Remote (-R)", dynamic: "SOCKS5 (-D)",
@@ -13,14 +14,41 @@ const KIND_LABEL: Record<TunnelDef["kind"], string> = {
 const blank = (sessionId: string): TunnelDef => ({
   id: crypto.randomUUID(), name: "", sessionId, kind: "local",
   bindHost: "127.0.0.1", bindPort: 8080, destHost: "127.0.0.1", destPort: 80,
-  autoStart: false,
+  autoStart: true, autoReconnect: true,
 });
+
+const isLive = (live?: LiveTunnel) => !!live && live.state !== "stopped";
+
+function StateChip({ live }: { live?: LiveTunnel }) {
+  switch (live?.state) {
+    case "running": return <Chip tone="ok">Đang chạy</Chip>;
+    case "connecting": return <Chip tone="accent">Đang kết nối…</Chip>;
+    case "retrying": return <Chip tone="warn">Nối lại sau {live.retryIn}s</Chip>;
+    case "stopped": return <Chip tone="err">Đã dừng</Chip>;
+    default: return <Chip>Tắt</Chip>;
+  }
+}
+
+/// Hai công tắc dùng chung cho thẻ tunnel và form sửa.
+function AutoSwitches({ t, onChange }: { t: TunnelDef; onChange: (next: TunnelDef) => void }) {
+  return (
+    <>
+      <Switch
+        checked={t.autoStart} onChange={(v) => onChange({ ...t, autoStart: v })}
+        label="Tự bật" tip="Chạy tunnel ngay khi mở app"
+      />
+      <Switch
+        checked={t.autoReconnect} onChange={(v) => onChange({ ...t, autoReconnect: v })}
+        label="Tự nối lại" tip="Rớt mạng hoặc máy ngủ dậy thì tự nối lại, không giới hạn số lần"
+      />
+    </>
+  );
+}
 
 export function TunnelsPanel() {
   const cfg = useConfig();
-  const { tunnels, startTunnel, stopTunnel, connBySession, conns, openSession, setEditing, toast } = useApp();
+  const { tunnels, asks, startTunnel, stopTunnel, setEditing, toast } = useApp();
   const [edit, setEdit] = useState<TunnelDef | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
   const pop = usePopover<TunnelDef>();
 
   const sshSessions = cfg.sessions.filter((s) => s.kind === "ssh");
@@ -35,9 +63,11 @@ export function TunnelsPanel() {
     setEdit(null);
   };
 
-  const run = async (t: TunnelDef) => {
-    setBusy(t.id);
-    try { await startTunnel(t.id); } finally { setBusy(null); }
+  /// Đổi "tự nối lại" khi đang chạy thì chạy lại để áp dụng ngay.
+  const toggle = (next: TunnelDef) => {
+    const prev = cfg.tunnels.find((x) => x.id === next.id);
+    cfg.upsertTunnel(next);
+    if (isLive(tunnels[next.id]) && prev?.autoReconnect !== next.autoReconnect) void startTunnel(next.id);
   };
 
   if (edit) {
@@ -89,14 +119,7 @@ export function TunnelsPanel() {
                 </Row>
               )}
               <Row label="">
-                <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={edit.autoStart}
-                    onChange={(e) => setEdit({ ...edit, autoStart: e.target.checked })}
-                  />
-                  <span className="hint">Tự chạy khi session kết nối</span>
-                </label>
+                <div className="tunnel-actions"><AutoSwitches t={edit} onChange={setEdit} /></div>
               </Row>
               <div className="hint" style={{ marginTop: 8 }}>
                 {edit.kind === "local" && "Cổng trên máy bạn → chuyển tới đích, đi qua server."}
@@ -120,7 +143,7 @@ export function TunnelsPanel() {
     <>
       <div className="side-head">
         <span className="side-title">SSH Tunnels</span>
-        <Chip tone="ok">{Object.keys(tunnels).length} đang chạy</Chip>
+        <Chip tone="ok">{Object.values(tunnels).filter((x) => x.state === "running").length} đang chạy</Chip>
         <IBtn
           icon="plus" tip="Tunnel mới" size="sm"
           disabled={sshSessions.length === 0}
@@ -145,30 +168,30 @@ export function TunnelsPanel() {
           {cfg.tunnels.map((t) => {
             const live = tunnels[t.id];
             const session = cfg.sessions.find((s) => s.id === t.sessionId);
-            const connected = !!conns[connBySession[t.sessionId]];
+            const tunnelAsks = asks.filter((a) => a.payload.connId === tunnelConnId(t.id));
             return (
               <div key={t.id} className="tunnel-card">
                 <div className="tunnel-actions">
                   <Icon n={t.kind === "dynamic" ? "globe" : "plug"} s={15} />
                   <strong className="tunnel-name">{t.name || KIND_LABEL[t.kind]}</strong>
-                  {live ? <Chip tone="ok">Đang chạy</Chip> : <Chip tone={connected ? undefined : "warn"}>{connected ? "Đã dừng" : "Chưa kết nối"}</Chip>}
+                  <StateChip live={live} />
                 </div>
-                <div className="hint">{KIND_LABEL[t.kind]} · {session?.name || session?.host || "Session đã bị xóa"}{t.autoStart ? " · Tự chạy" : ""}</div>
+                <div className="hint">{KIND_LABEL[t.kind]} · {session?.name || session?.host || "Session đã bị xóa"}</div>
+                {live?.detail && live.state !== "running" && (
+                  <div className="hint" style={{ color: live.state === "stopped" ? "var(--danger)" : "var(--warn)" }}>{live.detail}</div>
+                )}
+                {tunnelAsks.map((a) => <AskBar key={a.askId} ask={a} />)}
                 <TunnelRoute tunnel={t} server={session?.host} port={live?.port} />
                 <div className="tunnel-actions">
-                  {live ? (
-                    <Btn small icon="stop" onClick={() => void stopTunnel(t.id)}>Dừng</Btn>
-                  ) : connected ? (
-                    <Btn small icon="play" disabled={busy !== null} onClick={() => void run(t)}>{busy === t.id ? "Đang mở…" : "Chạy tunnel"}</Btn>
+                  {isLive(live) ? (
+                    <IBtn icon="stop" tip="Dừng" size="sm" onClick={() => void stopTunnel(t.id)} />
                   ) : (
-                    <Btn small icon="server" disabled={!session || busy !== null} onClick={async () => {
-                      setBusy(t.id);
-                      try { await openSession(t.sessionId); } finally { setBusy(null); }
-                    }}>{busy === t.id ? "Đang kết nối…" : "Kết nối SSH"}</Btn>
+                    <IBtn icon="play" tip="Chạy" size="sm" disabled={!session} onClick={() => void startTunnel(t.id)} />
                   )}
+                  <AutoSwitches t={t} onChange={toggle} />
                   <div style={{ flex: 1 }} />
-                  <IBtn icon="edit" tip={live ? "Dừng tunnel trước khi sửa" : "Sửa"} size="sm" disabled={!!live || busy === t.id} onClick={() => setEdit(t)} />
-                  <IBtn icon="trash" tip="Xóa" size="sm" disabled={busy === t.id} danger onClick={(e) => pop.open(e, t)} />
+                  <IBtn icon="edit" tip={isLive(live) ? "Dừng tunnel trước khi sửa" : "Sửa"} size="sm" disabled={isLive(live)} onClick={() => setEdit(t)} />
+                  <IBtn icon="trash" tip="Xóa" size="sm" danger onClick={(e) => pop.open(e, t)} />
                 </div>
               </div>
             );

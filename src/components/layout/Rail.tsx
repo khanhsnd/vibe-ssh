@@ -13,7 +13,7 @@ const ITEMS: { id: Exclude<SidePanel, null>; icon: string; tip: string }[] = [
 export function Rail() {
   const { side, setSide, tunnels, setPalette } = useApp();
   const sessions = useConfig((s) => s.sessions.length);
-  const running = Object.keys(tunnels).length;
+  const running = Object.values(tunnels).filter((t) => t.state === "running").length;
 
   const badge = (id: string) =>
     id === "sessions" ? (sessions || null) : id === "tunnels" ? (running || null) : null;

@@ -69,7 +69,7 @@ export function Palette() {
       );
     }
     for (const t of cfg.tunnels) {
-      const live = !!app.tunnels[t.id];
+      const live = !!app.tunnels[t.id] && app.tunnels[t.id].state !== "stopped";
       out.push({
         id: `t:${t.id}`,
         label: `${live ? "Dừng" : "Chạy"} tunnel ${t.name || t.kind}`,

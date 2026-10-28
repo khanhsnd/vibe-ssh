@@ -5,6 +5,10 @@ use serde::Serialize;
 pub enum AppError {
     #[error("{0}")]
     Msg(String),
+    /// Server hoặc người dùng đã từ chối (sai mật khẩu, host key không tin):
+    /// thử lại tự động cũng vô ích.
+    #[error("{0}")]
+    Rejected(String),
     #[error("SSH: {0}")]
     Ssh(#[from] russh::Error),
     #[error("SFTP: {0}")]

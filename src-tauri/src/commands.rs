@@ -273,7 +273,7 @@ pub async fn tunnel_start(
     app: AppHandle,
     state: St<'_>,
     spec: tunnel::TunnelSpec,
-) -> Result<u16> {
+) -> Result<()> {
     tunnel::start(ui(&app, &state), state.inner().clone(), spec).await
 }
 

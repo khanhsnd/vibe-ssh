@@ -503,6 +503,37 @@ fn sftp_transfers_whole_directories() {
 
 // ── Tunnel ────────────────────────────────────────────────────────────────
 
+fn tspec(s: &Sshd, id: &str, kind: &str) -> tunnel::TunnelSpec {
+    tunnel::TunnelSpec {
+        id: id.into(),
+        connect: opts(s, &s.client_key, vec![]),
+        kind: kind.into(),
+        bind_host: "127.0.0.1".into(),
+        bind_port: 0,
+        dest_host: "127.0.0.1".into(),
+        dest_port: s.port,
+        auto_reconnect: false,
+    }
+}
+
+/// Chờ `tunnel:state` của `id` đạt trạng thái `want`, trả payload của nó.
+async fn wait_tunnel(rx: &mut UnboundedReceiver<(String, Value)>, id: &str, want: &str) -> Value {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let (ev, v) = tokio::time::timeout_at(deadline, rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("tunnel {id} không tới trạng thái {want}"))
+            .expect("kênh sự kiện");
+        if ev == "tunnel:state" && v["id"] == id && v["state"] == want {
+            return v;
+        }
+    }
+}
+
+fn port_of(v: &Value) -> u16 {
+    v["port"].as_u64().expect("running phải kèm cổng") as u16
+}
+
 #[test]
 fn local_forward_carries_traffic() {
     let _g = serial();
@@ -510,36 +541,17 @@ fn local_forward_carries_traffic() {
 
     rt(async {
         let state = Arc::new(AppState::default());
-        let (u, _rx) = ui::channel(state.asks.clone());
-        let conn = conn::connect(u.clone(), state.clone(), opts(&s, &s.client_key, vec![]))
-            .await
-            .unwrap();
-        let id = conn.info.id.clone();
+        let (u, mut rx) = ui::channel(state.asks.clone());
 
         // -L <cổng trống>:127.0.0.1:<sshd> → đọc lại banner của chính sshd.
-        let port = tunnel::start(
-            u.clone(),
-            state.clone(),
-            tunnel::TunnelSpec {
-                id: "t-local".into(),
-                conn_id: id.clone(),
-                kind: "local".into(),
-                bind_host: "127.0.0.1".into(),
-                bind_port: 0,
-                dest_host: "127.0.0.1".into(),
-                dest_port: s.port,
-            },
-        )
-        .await
-        .expect("mở local forward");
-        assert!(port > 0);
+        tunnel::start(u, state.clone(), tspec(&s, "t-local", "local")).await.expect("mở local forward");
+        let port = port_of(&wait_tunnel(&mut rx, "t-local", "running").await);
 
         let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("nối vào tunnel");
         let banner = expect_ssh_banner(&mut sock).await;
         assert!(banner.starts_with("SSH-2.0-"), "banner qua -L: {banner:?}");
 
         tunnel::stop(&state, "t-local").await.unwrap();
-        conn::disconnect(&state, &id).await.unwrap();
     });
 }
 
@@ -550,26 +562,10 @@ fn dynamic_socks5_proxy_connects() {
 
     rt(async {
         let state = Arc::new(AppState::default());
-        let (u, _rx) = ui::channel(state.asks.clone());
-        let conn = conn::connect(u.clone(), state.clone(), opts(&s, &s.client_key, vec![]))
-            .await
-            .unwrap();
-        let id = conn.info.id.clone();
+        let (u, mut rx) = ui::channel(state.asks.clone());
 
-        let port = tunnel::start(
-            u.clone(),
-            state.clone(),
-            tunnel::TunnelSpec {
-                id: "t-dyn".into(),
-                conn_id: id.clone(),
-                kind: "dynamic".into(),
-                bind_host: "127.0.0.1".into(),
-                bind_port: 0,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("mở SOCKS5");
+        tunnel::start(u, state.clone(), tspec(&s, "t-dyn", "dynamic")).await.expect("mở SOCKS5");
+        let port = port_of(&wait_tunnel(&mut rx, "t-dyn", "running").await);
 
         let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("nối proxy");
         sock.write_all(&[5, 1, 0]).await.unwrap(); // ver, 1 method, no-auth
@@ -587,7 +583,6 @@ fn dynamic_socks5_proxy_connects() {
         assert!(banner.starts_with("SSH-2.0-"), "banner qua -D: {banner:?}");
 
         tunnel::stop(&state, "t-dyn").await.unwrap();
-        conn::disconnect(&state, &id).await.unwrap();
     });
 }
 
@@ -598,11 +593,7 @@ fn remote_forward_reaches_back() {
 
     rt(async {
         let state = Arc::new(AppState::default());
-        let (u, _rx) = ui::channel(state.asks.clone());
-        let conn = conn::connect(u.clone(), state.clone(), opts(&s, &s.client_key, vec![]))
-            .await
-            .unwrap();
-        let id = conn.info.id.clone();
+        let (u, mut rx) = ui::channel(state.asks.clone());
 
         // Đích của -R: một listener trên máy này, trả về "PONG".
         let sink = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -614,21 +605,10 @@ fn remote_forward_reaches_back() {
             }
         });
 
-        let bound = tunnel::start(
-            u.clone(),
-            state.clone(),
-            tunnel::TunnelSpec {
-                id: "t-remote".into(),
-                conn_id: id.clone(),
-                kind: "remote".into(),
-                bind_host: "127.0.0.1".into(),
-                bind_port: 0, // để server tự chọn
-                dest_host: "127.0.0.1".into(),
-                dest_port: sink_port,
-            },
-        )
-        .await
-        .expect("mở remote forward");
+        let mut spec = tspec(&s, "t-remote", "remote");
+        spec.dest_port = sink_port; // bind_port 0 → server tự chọn
+        tunnel::start(u, state.clone(), spec).await.expect("mở remote forward");
+        let bound = port_of(&wait_tunnel(&mut rx, "t-remote", "running").await);
         assert!(bound > 0, "server phải trả về cổng đã bind");
 
         // sshd chạy ngay trên máy này nên cổng nó bind cũng nối được từ đây.
@@ -641,6 +621,59 @@ fn remote_forward_reaches_back() {
         assert_eq!(&buf[..n], b"PONG", "dữ liệu phải đi từ server về listener cục bộ");
 
         tunnel::stop(&state, "t-remote").await.unwrap();
-        conn::disconnect(&state, &id).await.unwrap();
+    });
+}
+
+/// Rớt kết nối SSH: bật tự nối lại thì tunnel sống lại trên cùng cổng.
+#[test]
+fn tunnel_reconnects_after_drop() {
+    let _g = serial();
+    let Some(s) = setup() else { return };
+
+    rt(async {
+        let state = Arc::new(AppState::default());
+        let (u, mut rx) = ui::channel(state.asks.clone());
+        let mut spec = tspec(&s, "t-retry", "local");
+        spec.auto_reconnect = true;
+        let conn_id = spec.connect.id.clone();
+
+        tunnel::start(u, state.clone(), spec).await.unwrap();
+        let port = port_of(&wait_tunnel(&mut rx, "t-retry", "running").await);
+
+        // Giả lập mất mạng: đóng kết nối SSH bên dưới tunnel.
+        conn::disconnect(&state, &conn_id).await.unwrap();
+        let retry = wait_tunnel(&mut rx, "t-retry", "retrying").await;
+        assert_eq!(retry["retryIn"], 1, "lần nối lại đầu chờ 1s");
+        let again = port_of(&wait_tunnel(&mut rx, "t-retry", "running").await);
+        assert_eq!(again, port, "nối lại phải giữ nguyên cổng");
+
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("nối vào tunnel");
+        assert!(expect_ssh_banner(&mut sock).await.starts_with("SSH-2.0-"));
+
+        tunnel::stop(&state, "t-retry").await.unwrap();
+    });
+}
+
+/// Tắt tự nối lại: rớt kết nối là tunnel dừng hẳn và nhả cổng.
+#[test]
+fn tunnel_stops_after_drop_without_auto_reconnect() {
+    let _g = serial();
+    let Some(s) = setup() else { return };
+
+    rt(async {
+        let state = Arc::new(AppState::default());
+        let (u, mut rx) = ui::channel(state.asks.clone());
+        let spec = tspec(&s, "t-once", "local");
+        let conn_id = spec.connect.id.clone();
+
+        tunnel::start(u, state.clone(), spec).await.unwrap();
+        let port = port_of(&wait_tunnel(&mut rx, "t-once", "running").await);
+
+        conn::disconnect(&state, &conn_id).await.unwrap();
+        let stopped = wait_tunnel(&mut rx, "t-once", "stopped").await;
+        assert!(stopped["detail"].as_str().unwrap_or("").contains("mất kết nối"), "{stopped}");
+        assert!(state.tunnels.lock().await.is_empty(), "tunnel tự dừng phải tự dọn");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err(), "cổng phải được nhả");
     });
 }

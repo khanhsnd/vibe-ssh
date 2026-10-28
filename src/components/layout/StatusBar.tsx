@@ -9,7 +9,7 @@ export function StatusBar() {
   const sessions = useConfig((s) => s.sessions.length);
   const cur = activePane();
   const conn = cur?.pane.connId ? conns[cur.pane.connId] : undefined;
-  const running = Object.values(tunnels);
+  const running = Object.values(tunnels).filter((t) => t.state === "running");
   const active = xfers.filter((x) => x.state === "run");
 
   return (

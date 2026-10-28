@@ -1,108 +1,65 @@
 //! Port forwarding: local (-L), remote (-R) và dynamic SOCKS5 (-D).
+//!
+//! Mỗi tunnel giữ kết nối SSH riêng, không phụ thuộc tab terminal nào, và có
+//! một vòng giám sát: rớt kết nối thì (nếu bật) tự nối lại mãi đến khi người
+//! dùng bấm dừng. Trạng thái báo lên giao diện qua sự kiện `tunnel:state`.
 
-use crate::error::Result;
+use crate::error::{AppError, Result};
+use crate::ssh::conn::{self, ConnectOpts, RemoteFwd, SshConn};
 use crate::state::{AppState, Tunnel};
-use crate::{bail, ssh::conn::RemoteFwd};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
+use crate::bail;
+use serde::Deserialize;
+use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Duration;
 use crate::ui::Ui;
 use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
-#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[derive(Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TunnelSpec {
     pub id: String,
-    pub conn_id: String,
+    /// Kết nối riêng của tunnel; `connect.id` là id kết nối.
+    pub connect: ConnectOpts,
     /// `local` | `remote` | `dynamic`
     pub kind: String,
     pub bind_host: String,
     pub bind_port: u16,
     pub dest_host: String,
     pub dest_port: u16,
+    /// Rớt kết nối thì tự nối lại thay vì dừng hẳn.
+    pub auto_reconnect: bool,
 }
 
-pub async fn start(ui: Ui, state: Arc<AppState>, spec: TunnelSpec) -> Result<u16> {
-    let conn = state.conn(&spec.conn_id).await?;
-    let bind_host = if spec.bind_host.is_empty() {
-        "127.0.0.1".to_string()
+/// Số giây chờ trước mỗi lần nối lại; hết danh sách thì giữ mức cuối.
+const BACKOFF: [u64; 5] = [1, 2, 5, 10, 30];
+
+/// Chạy tunnel (hoặc chạy lại nếu đang chạy). Lỗi trả về ngay chỉ khi không mở
+/// được cổng cục bộ; lỗi kết nối đi qua `tunnel:state`.
+pub async fn start(ui: Ui, state: Arc<AppState>, spec: TunnelSpec) -> Result<()> {
+    if !matches!(spec.kind.as_str(), "local" | "remote" | "dynamic") {
+        bail!("Loại tunnel không hợp lệ: {}", spec.kind);
+    }
+    stop(&state, &spec.id).await?;
+
+    // Cổng local/SOCKS mở một lần và giữ suốt vòng đời tunnel: trong lúc nối
+    // lại, app client chỉ phải chờ trong hàng đợi chứ không bị từ chối.
+    let listener = if spec.kind == "remote" {
+        None
     } else {
-        spec.bind_host.clone()
-    };
-    let (stop_tx, stop_rx) = oneshot::channel::<()>();
-
-    let port = match spec.kind.as_str() {
-        "local" | "dynamic" => {
-            let listener = TcpListener::bind((bind_host.as_str(), spec.bind_port))
-                .await
-                .map_err(|e| {
-                    crate::error::AppError::Msg(format!(
-                        "Không mở được {bind_host}:{}: {e}",
-                        spec.bind_port
-                    ))
-                })?;
-            let port = listener.local_addr()?.port();
-            let dynamic = spec.kind == "dynamic";
-            let (ui2, spec2, conn2) = (ui.clone(), spec.clone(), conn.clone());
-            tokio::spawn(async move {
-                let reason = accept_loop(listener, conn2, spec2.clone(), dynamic, stop_rx).await;
-                ui2.emit("tunnel:closed", json!({ "id": spec2.id, "reason": reason }));
-            });
-            port
-        }
-        "remote" => {
-            let assigned = conn
-                .handle
-                .lock()
-                .await
-                .tcpip_forward(bind_host.clone(), spec.bind_port as u32)
-                .await?;
-            let port = if spec.bind_port == 0 {
-                assigned as u16
-            } else {
-                spec.bind_port
-            };
-            conn.shared.remote_fwds.lock().await.push(RemoteFwd {
-                bind_port: port as u32,
-                local_host: if spec.dest_host.is_empty() {
-                    "127.0.0.1".into()
-                } else {
-                    spec.dest_host.clone()
-                },
-                local_port: spec.dest_port,
-            });
-            // Kênh dừng: khi nhận tín hiệu thì hủy forward phía server.
-            let (ui2, spec2, conn2, bind2) =
-                (ui.clone(), spec.clone(), conn.clone(), bind_host.clone());
-            tokio::spawn(async move {
-                let _ = stop_rx.await;
-                let _ = conn2
-                    .handle
-                    .lock()
-                    .await
-                    .cancel_tcpip_forward(bind2, port as u32)
-                    .await;
-                conn2
-                    .shared
-                    .remote_fwds
-                    .lock()
-                    .await
-                    .retain(|f| f.bind_port != port as u32);
-                ui2.emit("tunnel:closed", json!({ "id": spec2.id, "reason": "đã dừng" }));
-            });
-            port
-        }
-        other => bail!("Loại tunnel không hợp lệ: {other}"),
+        let host = bind_host(&spec);
+        let l = TcpListener::bind((host.as_str(), spec.bind_port))
+            .await
+            .map_err(|e| AppError::Msg(format!("Không mở được {host}:{}: {e}", spec.bind_port)))?;
+        Some(l)
     };
 
-    state.tunnels.lock().await.insert(
-        spec.id.clone(),
-        Tunnel { stop: Some(stop_tx), conn_id: spec.conn_id.clone() },
-    );
-    ui.emit("tunnel:open", json!({ "id": spec.id, "port": port, "kind": spec.kind }));
-    Ok(port)
+    let (stop_tx, stop_rx) = oneshot::channel();
+    state.tunnels.lock().await.insert(spec.id.clone(), Tunnel { stop: Some(stop_tx) });
+    tokio::spawn(supervise(ui, state, spec, listener, stop_rx));
+    Ok(())
 }
 
 pub async fn stop(state: &Arc<AppState>, id: &str) -> Result<()> {
@@ -114,25 +71,102 @@ pub async fn stop(state: &Arc<AppState>, id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn accept_loop(
-    listener: TcpListener,
-    conn: Arc<crate::ssh::conn::SshConn>,
+fn bind_host(spec: &TunnelSpec) -> String {
+    if spec.bind_host.is_empty() { "127.0.0.1".into() } else { spec.bind_host.clone() }
+}
+
+fn emit(ui: &Ui, id: &str, status: &str, extra: Value) {
+    let mut v = json!({ "id": id, "state": status });
+    if let (Value::Object(m), Value::Object(e)) = (&mut v, extra) {
+        m.extend(e);
+    }
+    ui.emit("tunnel:state", v);
+}
+
+/// Kết quả một lượt phục vụ trên một kết nối.
+enum Served {
+    Stopped,
+    Dropped(String),
+}
+
+async fn supervise(
+    ui: Ui,
+    state: Arc<AppState>,
     spec: TunnelSpec,
-    dynamic: bool,
+    listener: Option<TcpListener>,
     mut stop: oneshot::Receiver<()>,
-) -> String {
+) {
+    let mut attempt = 0;
+    let reason = loop {
+        emit(&ui, &spec.id, "connecting", json!({}));
+        let dialed = tokio::select! {
+            _ = &mut stop => return,
+            r = conn::connect(ui.clone(), state.clone(), spec.connect.clone()) => r,
+        };
+        let reason = match dialed {
+            Ok(c) => {
+                attempt = 0;
+                let served = serve(&ui, &spec, &c, listener.as_ref(), &mut stop).await;
+                let _ = conn::disconnect(&state, &spec.connect.id).await;
+                match served {
+                    Served::Stopped => return,
+                    Served::Dropped(why) => why,
+                }
+            }
+            // Sai mật khẩu hay từ chối host key thì thử lại cũng vô ích.
+            Err(e @ AppError::Rejected(_)) => break e.to_string(),
+            Err(e) => e.to_string(),
+        };
+        if !spec.auto_reconnect {
+            break reason;
+        }
+        let wait = BACKOFF[attempt.min(BACKOFF.len() - 1)];
+        attempt += 1;
+        emit(&ui, &spec.id, "retrying", json!({ "detail": reason, "retryIn": wait }));
+        tokio::select! {
+            _ = &mut stop => return,
+            _ = tokio::time::sleep(Duration::from_secs(wait)) => {}
+        }
+    };
+    // Tự dừng (không phải do người dùng): dọn mục của chính mình.
+    state.tunnels.lock().await.remove(&spec.id);
+    emit(&ui, &spec.id, "stopped", json!({ "detail": reason }));
+}
+
+async fn serve(
+    ui: &Ui,
+    spec: &TunnelSpec,
+    c: &Arc<SshConn>,
+    listener: Option<&TcpListener>,
+    stop: &mut oneshot::Receiver<()>,
+) -> Served {
+    let port = match listener {
+        Some(l) => l.local_addr().map(|a| a.port()).unwrap_or(spec.bind_port),
+        None => match remote_forward(c, spec).await {
+            Ok(p) => p,
+            Err(e) => return Served::Dropped(e.to_string()),
+        },
+    };
+    emit(ui, &spec.id, "running", json!({ "port": port }));
+
+    // Keepalive của russh đóng session khi server im lặng; ở đây chỉ cần nhìn.
+    let mut check = tokio::time::interval(Duration::from_secs(1));
     loop {
         tokio::select! {
-            _ = &mut stop => return "đã dừng".into(),
-            accepted = listener.accept() => {
-                let Ok((sock, _peer)) = accepted else { return "lỗi accept".into() };
-                let conn = conn.clone();
-                let spec = spec.clone();
+            _ = &mut *stop => return Served::Stopped,
+            _ = check.tick() => {
+                if c.handle.lock().await.is_closed() {
+                    return Served::Dropped("mất kết nối SSH".into());
+                }
+            }
+            accepted = accept(listener) => {
+                let Ok((sock, _)) = accepted else { continue };
+                let (c, spec) = (c.clone(), spec.clone());
                 tokio::spawn(async move {
-                    let _ = if dynamic {
-                        socks5(sock, conn).await
+                    let _ = if spec.kind == "dynamic" {
+                        socks5(sock, c).await
                     } else {
-                        forward(sock, conn, &spec.dest_host, spec.dest_port).await
+                        forward(sock, c, &spec.dest_host, spec.dest_port).await
                     };
                 });
             }
@@ -140,9 +174,33 @@ async fn accept_loop(
     }
 }
 
+async fn accept(l: Option<&TcpListener>) -> std::io::Result<(TcpStream, std::net::SocketAddr)> {
+    match l {
+        Some(l) => l.accept().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Đăng ký -R trên kết nối mới. Ngắt kết nối là server tự hủy, không cần dọn.
+async fn remote_forward(c: &Arc<SshConn>, spec: &TunnelSpec) -> Result<u16> {
+    let assigned = c
+        .handle
+        .lock()
+        .await
+        .tcpip_forward(bind_host(spec), spec.bind_port as u32)
+        .await?;
+    let port = if spec.bind_port == 0 { assigned as u16 } else { spec.bind_port };
+    c.shared.remote_fwds.lock().await.push(RemoteFwd {
+        bind_port: port as u32,
+        local_host: if spec.dest_host.is_empty() { "127.0.0.1".into() } else { spec.dest_host.clone() },
+        local_port: spec.dest_port,
+    });
+    Ok(port)
+}
+
 async fn forward(
     mut sock: TcpStream,
-    conn: Arc<crate::ssh::conn::SshConn>,
+    conn: Arc<SshConn>,
     host: &str,
     port: u16,
 ) -> Result<()> {
@@ -158,7 +216,7 @@ async fn forward(
 }
 
 /// SOCKS5 tối giản: không xác thực, chỉ CONNECT — đủ cho `-D` kiểu OpenSSH.
-async fn socks5(mut sock: TcpStream, conn: Arc<crate::ssh::conn::SshConn>) -> Result<()> {
+async fn socks5(mut sock: TcpStream, conn: Arc<SshConn>) -> Result<()> {
     let mut head = [0u8; 2];
     sock.read_exact(&mut head).await?;
     if head[0] != 5 {

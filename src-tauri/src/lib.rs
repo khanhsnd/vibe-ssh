@@ -1,6 +1,7 @@
 mod commands;
 mod error;
 mod hostkeys;
+mod memory;
 mod pty;
 mod secrets;
 #[cfg(any(target_os = "macos", target_os = "windows"))]

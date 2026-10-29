@@ -369,41 +369,20 @@ pub fn which_bin(name: String) -> Option<String> {
     None
 }
 
-/// Lấy RSS (KB) từ output CSV của `tasklist`. Cột cuối có dạng `"12,345 K"`
-/// nên không thể chỉ `split(',')`.
-#[cfg(any(windows, test))]
-fn parse_tasklist_rss(text: &str) -> Option<u64> {
-    let line = text.lines().find(|l| l.contains(" K"))?;
-    let cell = line.rsplit('"').nth(1)?;
-    let digits: String = cell.chars().filter(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
-}
-
 /// RSS của tiến trình (KB) để hiện trên status bar.
 #[tauri::command]
-pub fn mem_usage() -> Option<u64> {
-    let pid = std::process::id();
-    #[cfg(unix)]
-    {
-        let out = std::process::Command::new("ps")
-            .args(["-o", "rss=", "-p", &pid.to_string()])
-            .output()
-            .ok()?;
-        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
-    }
-    #[cfg(windows)]
-    {
-        let out = std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
-            .output()
-            .ok()?;
-        parse_tasklist_rss(&String::from_utf8_lossy(&out.stdout))
-    }
+pub async fn mem_usage() -> Option<u64> {
+    // Never run memory collection on the native window/IPC thread. Windows
+    // reads its own working set directly, without starting tasklist or WMI.
+    tauri::async_runtime::spawn_blocking(crate::memory::resident_kib)
+        .await
+        .ok()
+        .flatten()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{exe_candidates, parse_tasklist_rss};
+    use super::exe_candidates;
 
     #[test]
     fn adds_windows_extensions() {
@@ -414,18 +393,5 @@ mod tests {
         );
         // PATHEXT rỗng/rác không được sinh tên trống.
         assert_eq!(exe_candidates("git", Some(".EXE;;"), true), vec!["git", "git.exe"]);
-    }
-
-    #[test]
-    fn reads_tasklist_memory_column() {
-        // Đúng định dạng `tasklist /NH /FO CSV`, có dấu phẩy phân cách nghìn.
-        let out = "\"vibe-ssh.exe\",\"7104\",\"Console\",\"1\",\"84,912 K\"\r\n";
-        assert_eq!(parse_tasklist_rss(out), Some(84_912));
-
-        let small = "\"vibe-ssh.exe\",\"7104\",\"Console\",\"1\",\"912 K\"\r\n";
-        assert_eq!(parse_tasklist_rss(small), Some(912));
-
-        // Không tìm thấy tiến trình → tasklist in thông báo, không có cột K.
-        assert_eq!(parse_tasklist_rss("INFO: No tasks are running.\r\n"), None);
     }
 }

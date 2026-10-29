@@ -72,6 +72,27 @@ cd src-tauri && cargo test
 Bộ test tự dựng một `sshd` thật trên loopback rồi tắt đi khi xong, không để lại
 gì trên máy.
 
+### Phát hành tự động bằng tag
+
+Đẩy tag `vMAJOR.MINOR.PATCH` lên GitHub để tự build và tạo GitHub Release:
+
+```bash
+git tag -a v0.0.2 -m "Release v0.0.2"
+git push origin v0.0.2
+```
+
+Workflow `.github/workflows/release.yml` build Windows x64 (`.exe`, `.msi`),
+macOS Apple Silicon và Intel (mỗi kiến trúc một `.dmg`). Chỉ khi cả ba build
+thành công, bộ cài và `SHA256SUMS.txt` mới được đưa lên GitHub Release.
+Version trong npm, Cargo và cấu hình Tauri tự đồng bộ theo tag trong runner;
+không cần commit tăng version trước mỗi lần phát hành. Tag như `v0.0.2-beta.1`
+tạo release được đánh dấu prerelease.
+
+GitHub Actions phải được bật trong repository. Workflow dùng `GITHUB_TOKEN`
+tự cấp với quyền `contents: write` ở bước phát hành, không cần thêm PAT.
+Các bản này chưa có chứng thư ký số Windows hoặc Apple notarization;
+macOS dùng chữ ký ad-hoc mặc định của Tauri. Xem tiến trình và lỗi ở tab Actions.
+
 ### Đóng gói để cài
 
 ```bash
@@ -83,7 +104,7 @@ Kết quả:
 | Tệp | Đường dẫn |
 |---|---|
 | App | `src-tauri/target/release/bundle/macos/Vibe SSH.app` |
-| Bộ cài | `src-tauri/target/release/bundle/dmg/Vibe SSH_0.1.0_aarch64.dmg` |
+| Bộ cài | `src-tauri/target/release/bundle/dmg/Vibe SSH_0.0.1_aarch64.dmg` |
 
 Cài: mở `.dmg` rồi kéo **Vibe SSH** vào Applications. Hoặc chép thẳng:
 

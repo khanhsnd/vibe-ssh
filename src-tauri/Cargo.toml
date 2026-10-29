@@ -1,6 +1,6 @@
 [package]
 name = "vibe-ssh"
-version = "0.1.0"
+version = "0.0.1"
 description = "Vibe SSH — terminal, SFTP & tunnel workbench"
 edition = "2021"
 rust-version = "1.82"

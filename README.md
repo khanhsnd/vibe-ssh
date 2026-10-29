@@ -92,6 +92,8 @@ GitHub Actions phải được bật trong repository. Workflow dùng `GITHUB_TO
 tự cấp với quyền `contents: write` ở bước phát hành, không cần thêm PAT.
 Các bản này chưa có chứng thư ký số Windows hoặc Apple notarization;
 macOS dùng chữ ký ad-hoc mặc định của Tauri. Xem tiến trình và lỗi ở tab Actions.
+Để build lại tag có sẵn, mở **Actions → Release → Run workflow**, chọn nhánh
+`master`, nhập tag (ví dụ `v0.0.1`) và chạy. Bộ cài của release có sẵn sẽ được cập nhật.
 
 ### Đóng gói để cài
 

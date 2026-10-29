@@ -52,7 +52,8 @@ export function Palette() {
       { id: "a:tab", label: "Tab mới", group: "Hành động", icon: "plus", hint: `${modKey()}T`, run: () => app.newTab() },
       { id: "a:local", label: "Mở shell máy này", group: "Hành động", icon: "terminal", run: () => void app.openLocal() },
       { id: "a:new", label: "Tạo session mới", group: "Hành động", icon: "server", run: () => { app.setSide("sessions"); app.setEditing("new"); } },
-      { id: "a:sftp", label: cfg.settings.showSftp ? "Ẩn bảng SFTP" : "Hiện bảng SFTP", group: "Hành động", icon: "files", run: () => app.setSftpVisible(!cfg.settings.showSftp) },
+      { id: "a:sftp", label: cfg.settings.showSftp ? "Ẩn SFTP" : "Hiện SFTP", group: "Hành động", icon: "files", run: () => cfg.patchSettings({ showSftp: !cfg.settings.showSftp }) },
+      { id: "a:tunnels", label: "Trình quản lý tunnel", group: "Hành động", icon: "plug", run: () => app.setTunnelsOpen(true) },
       { id: "a:bc", label: app.broadcast ? "Tắt multi-exec" : "Bật multi-exec", group: "Hành động", icon: "broadcast", run: () => app.toggleBroadcast() },
       { id: "a:theme", label: "Đổi theme", group: "Hành động", icon: "sun", run: () => {
           const order = ["dark", "light", "contrast"] as const;
@@ -79,12 +80,12 @@ export function Palette() {
         run: () => void (live ? app.stopTunnel(t.id) : app.startTunnel(t.id)),
       });
     }
-    for (const p of ["sessions", "tunnels", "macros", "keys", "settings"] as const) {
+    for (const p of ["sessions", "macros", "keys", "settings"] as const) {
       out.push({
         id: `p:${p}`,
         label: `Mở bảng ${p}`,
         group: "Điều hướng",
-        icon: p === "sessions" ? "server" : p === "tunnels" ? "plug" : p === "macros" ? "zap" : p === "keys" ? "key" : "settings",
+        icon: p === "sessions" ? "server" : p === "macros" ? "zap" : p === "keys" ? "key" : "settings",
         run: () => app.setSide(p),
       });
     }

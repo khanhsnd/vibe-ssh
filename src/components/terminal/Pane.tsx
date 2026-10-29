@@ -58,17 +58,19 @@ export function Pane({ tab, pane }: { tab: Tab; pane: PaneT }) {
         </div>
       )}
 
-      {paneAsks.map((a) => <AskBar key={a.askId} ask={a} />)}
+      {pane.status !== "connecting" && paneAsks.map((a) => <AskBar key={a.askId} ask={a} />)}
 
       {pane.status === "ready" && quick && <QuickSave sessionId={quick.id} host={quick.host} />}
 
       {pane.status === "empty" && <Home target={{ tabId: tab.id, paneId: pane.id }} />}
 
+      {/* Câu hỏi lúc đang kết nối hiện ngay giữa pane, nơi mắt đang nhìn. */}
       {pane.status === "connecting" && (
         <Center>
-          <span className="led busy" style={{ width: 9, height: 9 }} />
-          <div style={{ marginTop: 10, color: "var(--text-2)" }}>{pane.title}</div>
-          <div className="hint" style={{ marginTop: 3 }}>{pane.detail || "đang kết nối…"}</div>
+          {paneAsks.length === 0 && <span className="spinner" />}
+          <div className="connecting-title">{pane.title}</div>
+          <div className="hint">{pane.detail || "đang kết nối…"}</div>
+          {paneAsks.map((a) => <div key={a.askId} className="ask-card"><AskBar ask={a} /></div>)}
         </Center>
       )}
 
@@ -81,7 +83,7 @@ export function Pane({ tab, pane }: { tab: Tab; pane: PaneT }) {
           <span style={{ color: "var(--danger)", display: "grid", placeItems: "center" }}>
             <Icon n="alert" s={26} />
           </span>
-          <div style={{ marginTop: 10, color: "var(--text)" }}>Không kết nối được</div>
+          <div className="connecting-title">Không kết nối được</div>
           <div className="hint err" style={{ marginTop: 4, maxWidth: 460, userSelect: "text" }}>{pane.detail}</div>
           <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
             <Btn icon="refresh" small onClick={() => void reconnectPane(tab.id, pane.id)}>Thử lại</Btn>

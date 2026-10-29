@@ -107,7 +107,7 @@ export function NumField({
   small?: boolean;
 }) {
   return (
-    <div className={`field ${small ? "sm" : ""}`} style={{ width }}>
+    <div className={`field ${small ? "sm" : ""}`} style={{ width, flex: "none" }}>
       <input
         type="number"
         value={Number.isFinite(value) ? value : 0}

@@ -2,14 +2,9 @@ import { useEffect } from "react";
 import { isMac } from "@/lib/util";
 import { useApp } from "@/store/app";
 import { useConfig } from "@/store/config";
-import { Rail } from "./components/layout/Rail";
 import { Resizer } from "./components/layout/Resizer";
-import { StatusBar } from "./components/layout/StatusBar";
-import { TitleBar } from "./components/layout/TitleBar";
-import { KeysPanel } from "./components/sidebar/KeysPanel";
-import { MacrosPanel } from "./components/sidebar/MacrosPanel";
-import { SessionsPanel } from "./components/sidebar/SessionsPanel";
-import { SettingsPanel } from "./components/sidebar/SettingsPanel";
+import { Sidebar } from "./components/layout/Sidebar";
+import { TopBar } from "./components/layout/TopBar";
 import { TunnelsPanel } from "./components/sidebar/TunnelsPanel";
 import { SftpPanel } from "./components/sftp/SftpPanel";
 import { Workspace } from "./components/terminal/Workspace";
@@ -30,59 +25,53 @@ export default function App() {
   useTooltips();
   useShortcuts();
 
+  // SFTP theo pane SSH đang focus; focus sang pane khác trong cùng tab thì giữ
+  // pane SSH còn sống đầu tiên, để khối SFTP không chớp tắt làm terminal nhảy.
+  // Pane lỗi hoặc đã đóng thì mọi lệnh SFTP đều thất bại nên bị bỏ qua.
   const cur = app.activePane();
-  // Chỉ mở SFTP cho kết nối đang sống: pane lỗi hoặc đã đóng thì mọi lệnh SFTP
-  // đều thất bại, hiện bảng chỉ để báo lỗi là vô ích.
-  const sftpConn =
-    cfg.settings.showSftp && cur?.pane.kind === "ssh" && cur.pane.status === "ready" && cur.pane.connId
-      ? cur.pane.connId
-      : null;
+  const live = (p: { kind: string; status: string; connId: string | null }) =>
+    p.kind === "ssh" && p.status === "ready" && !!p.connId;
+  const sftp = !cfg.settings.showSftp || !cur
+    ? null
+    : live(cur.pane) ? cur.pane : cur.tab.panes.find(live) ?? null;
 
   return (
     <div className="app">
-      <TitleBar />
-      <div className="app-body">
-        <Rail />
+      {app.side && (
+        <>
+          <Sidebar />
+          <Resizer
+            value={cfg.settings.sidebarWidth}
+            onChange={(v) => cfg.patchSettings({ sidebarWidth: Math.round(v) })}
+            min={220}
+            max={480}
+          />
+        </>
+      )}
 
-        {app.side && app.side !== "tunnels" && (
-          <>
-            <div className="side" style={{ width: cfg.settings.sidebarWidth }}>
-              {app.side === "sessions" && <SessionsPanel />}
-              {app.side === "macros" && <MacrosPanel />}
-              {app.side === "keys" && <KeysPanel />}
-              {app.side === "settings" && <SettingsPanel />}
-            </div>
-            <Resizer
-              value={cfg.settings.sidebarWidth}
-              onChange={(v) => cfg.patchSettings({ sidebarWidth: Math.round(v) })}
-              min={240}
-              max={520}
-            />
-          </>
-        )}
-
-        <div className="work-wrap">
+      <main className="main">
+        <TopBar />
+        <div className="card term-card">
           <Workspace />
           {/* Phủ lên terminal thay vì thay thế: các phiên phía sau vẫn sống. */}
-          {app.side === "tunnels" && <TunnelsPanel />}
+          {app.tunnelsOpen && <TunnelsPanel />}
         </div>
-
-        {sftpConn && (
+        {sftp && (
           <>
             <Resizer
-              value={cfg.settings.sftpWidth}
-              onChange={(v) => cfg.patchSettings({ sftpWidth: Math.round(v) })}
-              min={280}
-              max={760}
+              row
               sign={-1}
+              value={cfg.settings.sftpHeight}
+              onChange={(v) => cfg.patchSettings({ sftpHeight: Math.round(v) })}
+              min={140}
+              max={640}
             />
-            <div className="side" style={{ width: cfg.settings.sftpWidth, borderRight: 0, borderLeft: "1px solid var(--border)" }}>
-              <SftpPanel connId={sftpConn} termId={cur?.pane.termId ?? undefined} />
+            <div className="card sftp-card" style={{ height: cfg.settings.sftpHeight }}>
+              <SftpPanel key={sftp.connId} connId={sftp.connId!} termId={sftp.termId ?? undefined} />
             </div>
           </>
         )}
-      </div>
-      <StatusBar />
+      </main>
 
       {app.palette && <Palette />}
       <Toasts />
@@ -128,20 +117,23 @@ function useShortcuts() {
       const mod = isMac() ? e.metaKey : e.ctrlKey;
       if (!mod) return;
       const app = useApp.getState();
-      const cfg = useConfig.getState();
       const tab = app.tabs.find((t) => t.id === app.activeTab);
       const k = e.key.toLowerCase();
 
       if (k === "k") { e.preventDefault(); app.setPalette(true); return; }
       if (k === "t") { e.preventDefault(); app.newTab(); return; }
       if (k === "w" && tab) { e.preventDefault(); app.closeTab(tab.id); return; }
-      if (k === "b") { e.preventDefault(); app.setSide(app.side ?? "sessions"); return; }
+      if (k === "b") { e.preventDefault(); app.setSide(app.side ? null : "sessions"); return; }
       if (k === "d" && tab) {
         e.preventDefault();
         app.setLayout(tab.id, e.shiftKey ? "rows" : "cols");
         return;
       }
-      if (k === "e") { e.preventDefault(); app.setSftpVisible(!cfg.settings.showSftp); return; }
+      if (k === "e") {
+        e.preventDefault();
+        useConfig.getState().patchSettings({ showSftp: !useConfig.getState().settings.showSftp });
+        return;
+      }
       if (k === "i" && e.shiftKey) { e.preventDefault(); app.toggleBroadcast(); return; }
       if (/^[1-9]$/.test(e.key)) {
         const t = app.tabs[Number(e.key) - 1];

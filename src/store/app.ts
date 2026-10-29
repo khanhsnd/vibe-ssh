@@ -48,7 +48,7 @@ export interface Xfer {
   state: "run" | "ok" | "err";
 }
 
-export type SidePanel = "sessions" | "tunnels" | "keys" | "macros" | "settings" | null;
+export type SidePanel = "sessions" | "macros" | "keys" | "settings" | null;
 
 /** Trạng thái theo sự kiện `tunnel:state` của backend. */
 export interface LiveTunnel {
@@ -75,6 +75,8 @@ interface AppStore {
   xfers: Xfer[];
   tunnels: Record<string, LiveTunnel>;
   side: SidePanel;
+  /// Trình quản lý tunnel phủ lên vùng terminal (như cửa sổ Tunneling của MobaXterm).
+  tunnelsOpen: boolean;
   editing: string | null; // session id đang sửa trong sidebar
   /// Thư mục mặc định cho session sắp tạo (đặt từ menu "Session mới ở đây").
   pendingFolder: string | null;
@@ -82,8 +84,6 @@ interface AppStore {
   broadcast: boolean;
   broadcastTargets: string[];
   mem: number | null;
-  /// Người dùng đã tự tắt bảng SFTP trong phiên này → không tự mở lại.
-  sftpDismissed: boolean;
   /// Thư mục hiện tại của từng terminal, do shell báo qua OSC 7.
   cwdByTerm: Record<string, string>;
 
@@ -91,6 +91,7 @@ interface AppStore {
   toast: (kind: Toast["kind"], msg: string) => void;
   dropToast: (id: string) => void;
   setSide: (p: SidePanel) => void;
+  setTunnelsOpen: (v: boolean) => void;
   setEditing: (id: string | null, folderId?: string | null) => void;
   setPalette: (v: boolean) => void;
 
@@ -116,7 +117,6 @@ interface AppStore {
 
   answerAsk: (askId: string, value: unknown) => Promise<void>;
   activePane: () => { tab: Tab; pane: Pane } | null;
-  setSftpVisible: (v: boolean) => void;
   setTermCwd: (termId: string, path: string) => void;
   toggleBroadcast: () => void;
   toggleBroadcastTarget: (termId: string) => void;
@@ -225,8 +225,8 @@ export const useApp = create<AppStore>((set, get) => {
   return {
     tabs: [], activeTab: null, conns: {}, connBySession: {},
     asks: [], toasts: [], xfers: [], tunnels: {},
-    side: "sessions", editing: null, pendingFolder: null, palette: false,
-    broadcast: false, broadcastTargets: [], mem: null, sftpDismissed: false, cwdByTerm: {},
+    side: "sessions", tunnelsOpen: false, editing: null, pendingFolder: null, palette: false,
+    broadcast: false, broadcastTargets: [], mem: null, cwdByTerm: {},
 
     init: async () => {
       // StrictMode gọi effect hai lần trong dev; chỉ đăng ký listener một lần.
@@ -251,7 +251,8 @@ export const useApp = create<AppStore>((set, get) => {
       window.setTimeout(() => get().dropToast(id), kind === "err" ? 9000 : 4500);
     },
     dropToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
-    setSide: (p) => set({ side: get().side === p ? null : p }),
+    setSide: (p) => set({ side: p }),
+    setTunnelsOpen: (v) => set({ tunnelsOpen: v }),
     setEditing: (id, folderId = null) =>
       set({ editing: id, pendingFolder: folderId, side: id ? "sessions" : get().side }),
     setPalette: (v) => set({ palette: v }),
@@ -411,10 +412,6 @@ export const useApp = create<AppStore>((set, get) => {
           logPath: s.logToFile ? logPath0(cfg.settings.logDir, s.name || s.host) : undefined,
         });
         mapPane(tabId, paneId, (p) => ({ ...p, termId, status: "ready", detail: "" }));
-        // Mở luôn cây thư mục xa như MobaXterm, trừ khi người dùng đã tắt.
-        if (!get().sftpDismissed && !cfg.settings.showSftp) {
-          useConfig.getState().patchSettings({ showSftp: true });
-        }
       } catch (e) {
         const msg = String(e);
         mapPane(tabId, paneId, (p) => ({ ...p, status: "error", detail: msg }));
@@ -520,11 +517,6 @@ export const useApp = create<AppStore>((set, get) => {
     setTermCwd: (termId, path) => {
       if (get().cwdByTerm[termId] === path) return;
       set({ cwdByTerm: { ...get().cwdByTerm, [termId]: path } });
-    },
-
-    setSftpVisible: (v) => {
-      set({ sftpDismissed: !v });
-      useConfig.getState().patchSettings({ showSftp: v });
     },
 
     toggleBroadcast: () => {

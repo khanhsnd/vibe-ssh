@@ -43,7 +43,7 @@ const endpoint = (host: string, port: number) => `${host.includes(":") ? `[${hos
 /// Phủ lên vùng làm việc (terminal vẫn chạy phía sau).
 export function TunnelsPanel() {
   const cfg = useConfig();
-  const { tunnels, asks, startTunnel, stopTunnel, setSide, toast } = useApp();
+  const { tunnels, asks, startTunnel, stopTunnel, setTunnelsOpen, toast } = useApp();
   const sshSessions = cfg.sessions.filter((s) => s.kind === "ssh" && !s.quick);
   const [draft, setDraft] = useState<TunnelDef>(() => blank(sshSessions[0]?.id ?? ""));
   /// Như MobaXterm: chọn session có sẵn, hoặc gõ thẳng user@host:port.
@@ -165,7 +165,7 @@ export function TunnelsPanel() {
         <div style={{ flex: 1 }} />
         <Btn small icon="play" disabled={!cfg.tunnels.length} onClick={() => cfg.tunnels.forEach((t) => !isLive(tunnels[t.id]) && void startTunnel(t.id))}>Chạy tất cả</Btn>
         <Btn small icon="stop" disabled={!running} onClick={() => cfg.tunnels.forEach((t) => void stopTunnel(t.id))}>Dừng tất cả</Btn>
-        <IBtn icon="x" tip="Đóng" onClick={() => setSide("tunnels")} />
+        <IBtn icon="x" tip="Đóng" onClick={() => setTunnelsOpen(false)} />
       </div>
 
       <div className="tn-form">

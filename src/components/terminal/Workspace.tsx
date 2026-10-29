@@ -1,7 +1,6 @@
 import { useApp } from "@/store/app";
 import { Icon } from "../ui/Icon";
 import { Pane } from "./Pane";
-import { TabBar } from "./TabBar";
 
 export function Workspace() {
   const { tabs, activeTab, newTab } = useApp();
@@ -9,7 +8,6 @@ export function Workspace() {
 
   return (
     <div className="work">
-      <TabBar />
       <div className="stage">
         {!tab && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>

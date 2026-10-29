@@ -97,8 +97,9 @@ export interface Settings {
   suggest: boolean;
   webgl: boolean;
   sidebarWidth: number;
-  sftpWidth: number;
+  /** Khối SFTP dưới terminal: bật/tắt và chiều cao. */
   showSftp: boolean;
+  sftpHeight: number;
   logDir: string;
 }
 
@@ -125,8 +126,8 @@ export const DEFAULT_SETTINGS: Settings = {
   suggest: true,
   webgl: true,
   sidebarWidth: 300,
-  sftpWidth: 380,
   showSftp: true,
+  sftpHeight: 260,
   logDir: "",
 };
 

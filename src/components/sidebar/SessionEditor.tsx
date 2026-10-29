@@ -34,7 +34,7 @@ const DEFAULT_PORT: Record<SessionKind, number> = {
 
 export function SessionEditor({ session, isNew }: { session: Session; isNew: boolean }) {
   const cfg = useConfig();
-  const { setEditing, openSession, toast, pendingFolder, setSide, tunnels: liveTunnels } = useApp();
+  const { setEditing, openSession, toast, pendingFolder, setTunnelsOpen, tunnels: liveTunnels } = useApp();
   const [s, setS] = useState<Session>(() =>
     isNew ? { ...session, folderId: pendingFolder ?? session.folderId } : session,
   );
@@ -382,11 +382,11 @@ export function SessionEditor({ session, isNew }: { session: Session; isNew: boo
           {isSsh && !isNew && (
             <Group
               title="Tunnel" icon="plug"
-              actions={<IBtn icon="plus" tip="Thêm tunnel" size="sm" onClick={() => setSide("tunnels")} />}
+              actions={<IBtn icon="plus" tip="Thêm tunnel" size="sm" onClick={() => setTunnelsOpen(true)} />}
             >
               {ownTunnels.length === 0 && <span className="hint">Chưa có tunnel nào qua session này.</span>}
               {ownTunnels.map((t) => (
-                <button key={t.id} type="button" className="home-row" onClick={() => setSide("tunnels")}>
+                <button key={t.id} type="button" className="home-row" onClick={() => setTunnelsOpen(true)}>
                   <span className="led" style={liveTunnels[t.id]?.state === "running" ? { background: "var(--ok)" } : undefined} />
                   <span className="main t1">{t.name}</span>
                   <span className="hint mono">{t.bindPort} → {t.kind === "dynamic" ? "SOCKS5" : t.destPort}</span>

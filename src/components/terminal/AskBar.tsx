@@ -13,15 +13,6 @@ export function AskBar({ ask }: { ask: Ask }) {
 
 type Answer = (askId: string, value: unknown) => Promise<void>;
 
-const barStyle: React.CSSProperties = {
-  flex: "none",
-  borderBottom: "1px solid var(--border)",
-  background: "var(--surface)",
-  padding: "9px 11px",
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-};
 
 function HostKey({ ask, answer }: { ask: Ask; answer: Answer }) {
   const p = ask.payload as Record<string, string>;
@@ -29,7 +20,7 @@ function HostKey({ ask, answer }: { ask: Ask; answer: Answer }) {
   const [remember, setRemember] = useState(true);
 
   return (
-    <div style={{ ...barStyle, borderLeft: `3px solid var(--${changed ? "danger" : "warn"})` }}>
+    <div className="ask-bar" style={{ borderLeft: `3px solid var(--${changed ? "danger" : "warn"})` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: `var(--${changed ? "danger" : "warn"})`, display: "grid" }}>
           <Icon n={changed ? "alert" : "shield"} s={16} />
@@ -85,7 +76,7 @@ function Secret({ ask, answer }: { ask: Ask; answer: Answer }) {
   const submit = () => void answer(ask.askId, { value, remember: remember && !!p.canSave });
 
   return (
-    <div style={{ ...barStyle, borderLeft: "3px solid var(--accent)" }}>
+    <div className="ask-bar" style={{ borderLeft: "3px solid var(--accent)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: "var(--accent)", display: "grid" }}>
           <Icon n={p.kind === "passphrase" ? "key" : "lock"} s={15} />
@@ -141,7 +132,7 @@ function Interactive({ ask, answer }: { ask: Ask; answer: Answer }) {
   const [vals, setVals] = useState<string[]>(() => prompts.map(() => ""));
 
   return (
-    <div style={{ ...barStyle, borderLeft: "3px solid var(--accent)" }}>
+    <div className="ask-bar" style={{ borderLeft: "3px solid var(--accent)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: "var(--accent)", display: "grid" }}>
           <Icon n="user" s={15} />

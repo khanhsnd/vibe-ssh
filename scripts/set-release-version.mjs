@@ -1,7 +1,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { resolve, sep } from "node:path";
 
-const root = fileURLToPath(new URL("../", import.meta.url));
+const root = process.argv[3]
+  ? resolve(process.argv[3]) + sep
+  : fileURLToPath(new URL("../", import.meta.url));
 const tag = process.argv[2];
 const number = "(?:0|[1-9][0-9]*)";
 const identifier = "(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)";
@@ -19,8 +22,8 @@ for (const path of ["package.json", "package-lock.json", "src-tauri/tauri.conf.j
   changes.set(path, JSON.stringify(json, null, 2) + "\n");
 }
 for (const [path, pattern] of [
-  ["src-tauri/Cargo.toml", /(\[package\][\s\S]*?\nversion = ")[^"]+(")/],
-  ["src-tauri/Cargo.lock", /(\[\[package\]\]\nname = "vibe-ssh"\nversion = ")[^"]+(")/],
+  ["src-tauri/Cargo.toml", /(\[package\][\s\S]*?\r?\nversion = ")[^"]+(")/],
+  ["src-tauri/Cargo.lock", /(\[\[package\]\]\r?\nname = "vibe-ssh"\r?\nversion = ")[^"]+(")/],
 ]) {
   const source = readFileSync(root + path, "utf8");
   if (!pattern.test(source)) throw new Error(`Cannot locate application version in ${path}`);

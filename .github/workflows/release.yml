@@ -44,14 +44,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+      # Use tooling from the workflow revision when rebuilding an older tag.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tools
+          sparse-checkout: scripts
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+      - name: Test release version handling
+        run: node .release-tools/scripts/set-release-version.test.mjs
       - name: Set version from tag
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        run: node scripts/set-release-version.mjs "$RELEASE_TAG"
+        run: node .release-tools/scripts/set-release-version.mjs "$RELEASE_TAG" "$GITHUB_WORKSPACE"
       - name: Install frontend dependencies
         run: npm ci --include=dev
       - name: Set up Rust
